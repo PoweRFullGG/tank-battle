@@ -1,0 +1,14 @@
+{
+  "name": "tank-battle-online",
+  "version": "2.0.0",
+  "description": "Tank Battle Online — браузерная игра про танки с мультиплеером (Node.js, без зависимостей)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT",
+  "private": true
+}
