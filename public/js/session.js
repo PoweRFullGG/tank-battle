@@ -45,15 +45,27 @@
     return out;
   }
 
-  function colorize(scene) {
+  const DANGER = [255, 70, 70], SAFE = [70, 235, 120];
+  function colorize(scene, myTankId) {
     const cmap = new Map();
-    for (const t of scene.tanks) cmap.set(t.id, R.tankColor(scene, t));
+    const tmap = scene._tmap || (scene._tmap = new Map());
+    for (const t of scene.tanks) { cmap.set(t.id, R.tankColor(scene, t)); tmap.set(t.id, t.team); }
+    const ff = R.settings.ffBullets && !scene.demo;
+    const myTeam = scene.meTeam || 0;
     for (const b of scene.bullets) {
-      const c = cmap.get(b.owner) || scene.ownerColors.get(b.owner) || TG.BOT_COLOR;
-      scene.ownerColors.set(b.owner, c);
+      let c;
+      if (ff) {
+        const team = tmap.has(b.owner) ? tmap.get(b.owner) : 0;
+        const safe = b.owner === myTankId || (myTeam !== 0 && team === myTeam);
+        c = safe ? SAFE : DANGER;
+      } else {
+        c = cmap.get(b.owner) || scene.ownerColors.get(b.owner) || TG.BOT_COLOR;
+        scene.ownerColors.set(b.owner, c);
+      }
       b.c = c; b.cs = R.cstr(c);
     }
     if (scene.ownerColors.size > 500) scene.ownerColors.clear();
+    if (tmap.size > 600) tmap.clear();
   }
 
   // Эффекты от событий симуляции
@@ -91,7 +103,7 @@
         }
         break;
       case 'place':
-        A.play('place', { x: e.x, y: e.y, vol: 0.7 });
+        A.play(e.bomb ? 'click' : 'place', { x: e.x, y: e.y, vol: 0.7 });
         R.spark(e.x, e.y, [150, 170, 255], 8);
         break;
       case 'break':
@@ -200,7 +212,7 @@
       w.addPlayer({ id: 1, name: this.profile.name, color: this.profile.color, shape: this.profile.shape, team: this.profile.team || 0 });
       w.start();
       this.info = w.roundInfo();
-      this.players = new Map([[1, { name: this.profile.name, color: this.profile.color, shape: this.profile.shape }]]);
+      this.players = new Map([[1, { name: this.profile.name, color: this.profile.color, shape: this.profile.shape, avatar: this.profile.avatar || '' }]]);
       this.sceneBase = baseScene(this.info, this.players);
       this.seq = 0; this.acc = 0;
       this.prev = null; this.cur = this.snap();
@@ -258,7 +270,7 @@
           if (tk.alive && !this.paused && !(tk.f & F.stun)) tk.a = this.game.liveAim != null ? this.game.liveAim : tk.a;
         }
       }
-      colorize(sc);
+      colorize(sc, this.myTankId);
       sc.focus = sc.me;
       sc.over = this.world.over;
       respawnHint(this, sc, this.mode);
@@ -302,7 +314,8 @@
       this.pred = null;
       this.off = { x: 0, y: 0 };
       this.acc = 0;
-      this.clockOff = null; this.jitter = 0; this.delay = 5; this.lastRt = 0;
+      this.clockOff = null; this.jitter = 0; this.delay = 4; this.lastRt = 0; this.snapInt = 2;
+      this._predHit = new Map();
       this.hud = null; this.pers = null; this.sb = null;
       this.events = [];
       this.baseSnap = null;
@@ -329,6 +342,7 @@
       }
       const last = this.snaps[this.snaps.length - 1];
       if (last && s.tick <= last.tick) return;
+      if (last) this.snapInt = this.snapInt * 0.9 + Math.min(12, s.tick - last.tick) * 0.1;
       this.snaps.push(s);
       if (this.snaps.length > 90) this.snaps.splice(0, this.snaps.length - 90);
       if (s.me) {
@@ -408,8 +422,10 @@
       this.off.x *= k; this.off.y *= k;
       if (Math.abs(this.off.x) < 0.01) this.off.x = 0;
       if (Math.abs(this.off.y) < 0.01) this.off.y = 0;
-      const target = Math.max(3, Math.min(14, C.SNAP_EVERY + 1.5 + this.jitter * 2));
+      // минимальная безопасная задержка интерполяции: интервал снапшотов + запас на джиттер сети
+      const target = Math.max(2, Math.min(14, this.snapInt + 1 + this.jitter * 2));
       this.delay += (target - this.delay) * Math.min(1, dt / 800);
+      this.net.viewDelay = this.delay;
     }
 
     renderTick() {
@@ -464,11 +480,27 @@
           for (let i = 0; i < steps; i++) { TG.stepBullet(bb, this.map); if (bb.hitObs) { gone = true; break; } }
           if (gone) continue;
           const ob = { id: b0.id, x: bb.x + bb.vx * frac, y: bb.y + bb.vy * frac, size: bb.size, owner: b0.owner, fl: b0.fl };
+          // попадание своей пули во врага показываем сразу, не дожидаясь сервера
+          if (this._predHit.has(ob.id)) continue;
+          let hitT = null;
+          for (const tk of sc.tanks) {
+            if (tk.id === this.myTankId || !(tk.f & 1)) continue;
+            if (this.myTeamNow() !== 0 && tk.team === this.myTeamNow()) continue;
+            const rr = tk.r + ob.size;
+            if ((tk.x - ob.x) * (tk.x - ob.x) + (tk.y - ob.y) * (tk.y - ob.y) < rr * rr) { hitT = tk; break; }
+          }
+          if (hitT) {
+            this._predHit.set(ob.id, performance.now());
+            R.explosion(ob.x, ob.y, [255, 230, 120], 8, 0.6);
+            A.play('hit', { x: ob.x, y: ob.y, vol: 0.5 });
+            continue;
+          }
           sc.bullets.push(ob);
           ownNow.set(ob.id, ob);
         }
       }
-      for (const [id, ob] of ownPrev) if (!ownNow.has(id)) R.spark(ob.x, ob.y, ob.c || [220, 220, 220], 6);
+      for (const [id, ob] of ownPrev) if (!ownNow.has(id) && !this._predHit.has(id)) R.spark(ob.x, ob.y, ob.c || [220, 220, 220], 6);
+      if (this._predHit.size > 60) { const lim = performance.now() - 3000; for (const [k, v] of this._predHit) if (v < lim) this._predHit.delete(k); }
       this._ownPrev = ownNow; this._ownNow = ownPrev;
       sc.hud = this.hud; sc.pers = this.pers;
       sc.dyn = this.dyn;
@@ -486,7 +518,7 @@
           if (this.game.liveAim != null && !(tk.f & F.stun)) tk.a = this.game.liveAim;
         }
       }
-      colorize(sc);
+      colorize(sc, this.myTankId);
       sc.spectating = null;
       if (sc.me && sc.me.alive) sc.focus = sc.me;
       else {
@@ -549,7 +581,7 @@
     scene() {
       const sc = this.sceneBase;
       interpolate(this, this.prev || this.cur, this.cur, Math.min(1, this.acc / TMS), sc);
-      colorize(sc);
+      colorize(sc, this.myTankId);
       sc.dyn = this.world.dyn;
       const now = performance.now();
       let f = sc.tanks.find((t) => t.id === this.focusId && (t.f & 1));
@@ -593,7 +625,7 @@
     Net.ws = ws;
     ws.onopen = () => {
       Net.connected = true; Net.retry = 0;
-      Net.send({ t: 'hello', name: Net.profile.name, color: Net.profile.color, shape: Net.profile.shape });
+      Net.send({ t: 'hello', name: Net.profile.name, color: Net.profile.color, shape: Net.profile.shape, avatar: Net.profile.avatar || '' });
       if (Net.code) Net.send({ t: 'join', code: Net.code, token: Net.token });
       Net.emit('open');
     };
@@ -636,5 +668,5 @@
     if (Net.code) try { sessionStorage.removeItem('tbo_tok_' + Net.code); } catch (e) { /* игнор */ }
     Net.code = null; Net.token = null;
   };
-  setInterval(() => { if (Net.connected) Net.send({ t: 'ping', c: performance.now(), rtt: Net.rtt }); }, 1000);
+  setInterval(() => { if (Net.connected) Net.send({ t: 'ping', c: performance.now(), rtt: Net.rtt, d: Math.round((Net.viewDelay || 4) * 10) / 10 }); }, 1000);
 })(self.TG);

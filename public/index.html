@@ -3,248 +3,315 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0b0d16">
+<meta name="theme-color" content="#0b0d12">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Tank Battle Online</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d16'/%3E%3Ccircle cx='28' cy='34' r='16' fill='%2300ff64' stroke='%23000' stroke-width='3'/%3E%3Crect x='28' y='30' width='28' height='8' rx='3' fill='%2300c8ff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d12'/%3E%3Crect x='14' y='22' width='30' height='24' rx='5' fill='%235ec8f2'/%3E%3Crect x='30' y='30' width='24' height='7' rx='3' fill='%23e7eaf1'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=Russo+One&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <canvas id="game"></canvas>
 
+<!-- Набор иконок -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z" fill="currentColor"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.8"/><path d="M16.5 14.4c2.6.2 4.4 2 5 5.1"/></g></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M4.2 7.5l2.3 1.3M17.5 15.2l2.3 1.3M4.2 16.5l2.3-1.3M17.5 8.8l2.3-1.3" stroke-linecap="round"/><circle cx="12" cy="12" r="7"/></g></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.8.4-1.2 1-1.2 1.8v.5"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></g></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></g></symbol>
+    <symbol id="i-waves" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></g></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-swords" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l10 10M4 4h4M4 4v4M14 14l-2 2M14 14l2-2M15 17l2 2M17 15l2 2"/><path d="M20 4L10 14M20 4h-4M20 4v4M10 14l2 2M10 14l-2-2M9 17l-2 2M7 15l-2 2"/></g></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></g></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 24 24"><path d="M4 18h16M4 18l-1-10 5 4 4-6 4 6 5-4-1 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></g></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-trophy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H4.5a3 3 0 0 0 3.5 4M16 6h3.5a3 3 0 0 1-3.5 4M12 13v4M8.5 20h7l-1-3h-5z"/></g></symbol>
+    <symbol id="i-cart" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 5h2.5l2.2 10h10.1l2-7H6.6"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></g></symbol>
+    <symbol id="i-block" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v8M8 12v8M16 12v8"/></g></symbol>
+    <symbol id="i-bomb" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="14" r="6.5"/><path d="M15 9.5l2-2M17.5 4.5l.5-1.5M19.5 6.5l1.5-.5M17 7l1.5-1.5"/></g></symbol>
+    <symbol id="i-fire" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke-linecap="round"/></g></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v4h14v-4"/></g></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/></g></symbol>
+    <symbol id="i-gem" viewBox="0 0 24 24"><path d="M12 3l7 7-7 11-7-11z" fill="currentColor"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></g></symbol>
+    <symbol id="i-tank" viewBox="0 0 24 24"><g fill="currentColor"><rect x="3" y="9" width="12" height="9" rx="2"/><rect x="11" y="11.5" width="10" height="3" rx="1.5"/><rect x="2" y="17" width="14" height="3" rx="1.5" opacity=".6"/></g></symbol>
+  </defs>
+</svg>
+
 <!-- ================= ГЛАВНОЕ МЕНЮ ================= -->
-<section id="scr-main" class="screen">
-  <div class="menu-box">
-    <h1 class="logo">TANK BATTLE<span>ONLINE</span></h1>
-    <div class="tank-preview"><canvas id="main-preview" width="120" height="120"></canvas></div>
-    <div class="btns">
-      <button class="btn big" data-go="solo">▶ Одиночная игра</button>
-      <button class="btn big accent" data-go="multi">👥 Играть с друзьями</button>
-      <button class="btn" data-go="settings">⚙ Настройки</button>
-      <button class="btn" data-go="help">❔ Как играть</button>
-      <button class="btn dim" data-go="admin">🔒 Админ-панель</button>
+<section id="scr-main" class="screen home">
+  <div class="home-side">
+    <div class="brand">
+      <div class="brand-mark"><svg><use href="#i-tank"/></svg></div>
+      <div class="brand-text">
+        <div class="brand-name">TANK BATTLE</div>
+        <div class="brand-tag">Онлайн-сражения танков в браузере</div>
+      </div>
     </div>
-    <div class="foot" id="main-foot">WASD — движение · Мышь — прицел · ЛКМ/Пробел — огонь</div>
+    <nav class="home-nav">
+      <button class="nav-item primary" data-go="solo"><svg class="ic"><use href="#i-play"/></svg><span><b>Одиночная игра</b><small>Кампания, волны, выживание и другие режимы</small></span></button>
+      <button class="nav-item" data-go="multi"><svg class="ic"><use href="#i-users"/></svg><span><b>Играть с друзьями</b><small>Комната по коду или ссылке</small></span></button>
+      <button class="nav-item" data-go="settings"><svg class="ic"><use href="#i-gear"/></svg><span><b>Настройки</b><small>Танк, аватар, звук, графика, управление</small></span></button>
+      <button class="nav-item" data-go="help"><svg class="ic"><use href="#i-help"/></svg><span><b>Как играть</b><small>Управление, режимы, враги</small></span></button>
+    </nav>
+    <div class="home-foot">
+      <button class="profile-chip" data-go="settings">
+        <canvas id="main-preview" width="88" height="88"></canvas>
+        <span><b id="main-name">Игрок</b><small>Изменить профиль</small></span>
+      </button>
+      <button class="link-btn" data-go="admin"><svg class="ic sm"><use href="#i-lock"/></svg>Админ</button>
+    </div>
+    <div class="hint-line" id="main-foot">WASD — движение · мышь — прицел · ЛКМ — огонь</div>
   </div>
 </section>
 
 <!-- ================= ОДИНОЧНАЯ ИГРА ================= -->
 <section id="scr-solo" class="screen" hidden>
-  <div class="menu-box wide">
-    <h2>Одиночная игра</h2>
-    <div class="modes" id="solo-modes"></div>
-    <div class="opts" id="solo-opts"></div>
-    <div class="row">
-      <button class="btn" data-go="main">← Назад</button>
-      <button class="btn accent" id="solo-start">▶ Начать</button>
+  <div class="page">
+    <header class="page-head"><button class="icon-btn" data-go="main" aria-label="Назад"><svg><use href="#i-back"/></svg></button><h2>Одиночная игра</h2></header>
+    <div class="page-body">
+      <div class="modes" id="solo-modes"></div>
+      <div class="opts" id="solo-opts"></div>
     </div>
+    <footer class="page-foot"><button class="btn primary big" id="solo-start"><svg class="ic"><use href="#i-play"/></svg>Начать</button></footer>
   </div>
 </section>
 
 <!-- ================= МУЛЬТИПЛЕЕР ================= -->
 <section id="scr-multi" class="screen" hidden>
-  <div class="menu-box">
-    <h2>Играть с друзьями</h2>
-    <div id="multi-status" class="status"></div>
-    <label class="field">Ваше имя
-      <input id="multi-name" maxlength="16" autocomplete="off" spellcheck="false">
-    </label>
-    <button class="btn big accent" id="btn-create">＋ Создать комнату</button>
-    <div class="or">или войдите по коду друга</div>
-    <div class="join-row">
-      <input id="join-code" maxlength="4" placeholder="КОД" autocomplete="off" spellcheck="false">
-      <button class="btn accent" id="btn-join">Войти</button>
+  <div class="page narrow">
+    <header class="page-head"><button class="icon-btn" data-go="main" aria-label="Назад"><svg><use href="#i-back"/></svg></button><h2>Играть с друзьями</h2></header>
+    <div class="page-body">
+      <div id="multi-status" class="status"></div>
+      <label class="field">Ваше имя<input id="multi-name" maxlength="16" autocomplete="off" spellcheck="false"></label>
+      <button class="btn primary big wide" id="btn-create"><svg class="ic"><use href="#i-users"/></svg>Создать комнату</button>
+      <div class="divider"><span>или войдите по коду друга</span></div>
+      <div class="join-row">
+        <input id="join-code" maxlength="4" placeholder="КОД" autocomplete="off" spellcheck="false">
+        <button class="btn big" id="btn-join">Войти</button>
+      </div>
+      <p class="hint">Создайте комнату и отправьте друзьям ссылку или 4-значный код. Все должны открыть один и тот же адрес сервера.</p>
     </div>
-    <div class="hint">Создайте комнату и отправьте друзьям ссылку или 4-значный код.<br>Все должны открыть <b>один и тот же адрес сервера</b>.</div>
-    <div class="row"><button class="btn" data-go="main">← Назад</button></div>
   </div>
 </section>
 
 <!-- ================= ЛОББИ ================= -->
 <section id="scr-lobby" class="screen" hidden>
-  <div class="menu-box wide lobby">
-    <div class="lobby-head">
-      <div>
-        <div class="muted">Код комнаты</div>
-        <div class="room-code" id="lobby-code">----</div>
+  <div class="page wide">
+    <header class="page-head">
+      <button class="icon-btn" id="btn-leave" aria-label="Выйти"><svg><use href="#i-back"/></svg></button>
+      <div class="lobby-title"><small>Комната</small><span class="room-code" id="lobby-code">----</span></div>
+      <div class="head-right">
+        <span class="muted small link-text" id="lobby-link"></span>
+        <button class="btn" id="btn-copy-link"><svg class="ic sm"><use href="#i-link"/></svg>Скопировать ссылку</button>
       </div>
-      <div class="lobby-share">
-        <button class="btn small" id="btn-copy-link">🔗 Скопировать ссылку</button>
-        <div class="muted small" id="lobby-link"></div>
-      </div>
-    </div>
-    <div class="lobby-grid">
-      <div class="panel">
-        <h3>Игроки <span id="lobby-count"></span></h3>
+    </header>
+    <div class="page-body lobby-grid">
+      <div class="card">
+        <div class="card-title">Игроки <span id="lobby-count" class="muted"></span></div>
         <div id="lobby-players" class="players"></div>
-        <div id="lobby-teams" class="row" hidden></div>
+        <div id="lobby-teams" class="team-row" hidden></div>
       </div>
-      <div class="panel">
-        <h3>Режим</h3>
-        <div id="lobby-mode"></div>
+      <div class="card">
+        <div class="card-title">Режим</div>
+        <div id="lobby-mode" class="modes compact"></div>
         <div id="lobby-opts" class="opts"></div>
-        <div id="lobby-mode-ro" class="muted"></div>
+        <div id="lobby-mode-ro" class="muted small"></div>
       </div>
-      <div class="panel chat-panel">
-        <h3>Чат</h3>
+      <div class="card chat-card">
+        <div class="card-title">Чат</div>
         <div id="lobby-chat" class="chat-log"></div>
-        <form id="lobby-chat-form" class="chat-form"><input id="lobby-chat-input" maxlength="140" placeholder="Сообщение…" autocomplete="off"><button class="btn small">➤</button></form>
+        <form id="lobby-chat-form" class="chat-form"><input id="lobby-chat-input" maxlength="140" placeholder="Сообщение" autocomplete="off"><button class="icon-btn" aria-label="Отправить"><svg><use href="#i-send"/></svg></button></form>
       </div>
     </div>
-    <div class="row">
-      <button class="btn" id="btn-leave">← Выйти</button>
-      <button class="btn big accent" id="btn-start">▶ Начать игру</button>
+    <footer class="page-foot">
       <div id="lobby-wait" class="muted">Ждём, когда хост начнёт игру…</div>
-    </div>
+      <button class="btn primary big" id="btn-start"><svg class="ic"><use href="#i-play"/></svg>Начать игру</button>
+    </footer>
   </div>
 </section>
 
 <!-- ================= НАСТРОЙКИ ================= -->
 <section id="scr-settings" class="screen" hidden>
-  <div class="menu-box xwide">
-    <h2>Настройки</h2>
-    <div class="settings-grid">
-      <div class="panel">
-        <h3>Ваш танк</h3>
-        <div class="tank-preview"><canvas id="set-preview" width="120" height="120"></canvas></div>
-        <label class="field">Имя <input id="set-name" maxlength="16" autocomplete="off" spellcheck="false"></label>
-        <div class="muted">Цвет</div>
+  <div class="page wide">
+    <header class="page-head"><button class="icon-btn" data-go="back" aria-label="Назад"><svg><use href="#i-back"/></svg></button><h2>Настройки</h2></header>
+    <div class="page-body settings-grid">
+      <div class="card">
+        <div class="card-title">Танк и профиль</div>
+        <div class="profile-edit">
+          <canvas id="set-preview" width="120" height="120"></canvas>
+          <div class="avatar-actions">
+            <input type="file" id="set-avatar-file" accept="image/*" hidden>
+            <button class="btn small" id="set-avatar-btn"><svg class="ic sm"><use href="#i-upload"/></svg>Загрузить аватар</button>
+            <button class="btn small ghost" id="set-avatar-clear"><svg class="ic sm"><use href="#i-trash"/></svg>Убрать</button>
+            <span class="muted small">Картинка станет корпусом танка</span>
+          </div>
+        </div>
+        <label class="field">Имя<input id="set-name" maxlength="16" autocomplete="off" spellcheck="false"></label>
+        <div class="field-label">Цвет</div>
         <div id="set-colors" class="swatches"></div>
-        <div class="muted">Форма</div>
-        <div id="set-shapes" class="shapes"></div>
+        <div class="field-label">Форма</div>
+        <div id="set-shapes" class="chips"></div>
       </div>
-      <div class="panel">
-        <h3>🔊 Звук</h3>
-        <label class="field">Общая громкость: <b id="set-volume-v"></b><input type="range" id="set-volume" min="0" max="100"></label>
-        <label class="field">Эффекты: <b id="set-sfx-v"></b><input type="range" id="set-sfx" min="0" max="100"></label>
-        <label class="field">Музыка: <b id="set-music-v"></b><input type="range" id="set-music" min="0" max="100"></label>
-        <label class="check"><input type="checkbox" id="set-vibrate"> Вибрация на телефоне</label>
-        <button class="btn small" id="btn-test-sound">🔈 Проверить звук</button>
+      <div class="card">
+        <div class="card-title">Звук</div>
+        <label class="range"><span>Общая громкость <b id="set-volume-v"></b></span><input type="range" id="set-volume" min="0" max="100"></label>
+        <label class="range"><span>Эффекты <b id="set-sfx-v"></b></span><input type="range" id="set-sfx" min="0" max="100"></label>
+        <label class="range"><span>Музыка <b id="set-music-v"></b></span><input type="range" id="set-music" min="0" max="100"></label>
+        <label class="switch"><input type="checkbox" id="set-vibrate"><i></i>Вибрация на телефоне</label>
+        <button class="btn small" id="btn-test-sound">Проверить звук</button>
       </div>
-      <div class="panel">
-        <h3>🎨 Графика</h3>
-        <label class="field">Качество графики
+      <div class="card">
+        <div class="card-title">Графика и интерфейс</div>
+        <label class="field">Качество
           <select id="set-quality">
-            <option value="high">Высокое (неон, частицы)</option>
+            <option value="high">Высокое</option>
             <option value="medium">Среднее</option>
-            <option value="low">Низкое (для слабых устройств)</option>
+            <option value="low">Низкое — для слабых устройств</option>
           </select>
         </label>
-        <label class="field">Количество частиц: <b id="set-particles-v"></b><input type="range" id="set-particles" min="25" max="100" step="5"></label>
-        <label class="field">Масштаб камеры на больших картах: <b id="set-zoom-v"></b><input type="range" id="set-zoom" min="70" max="140" step="5"></label>
-        <label class="check"><input type="checkbox" id="set-shake"> Тряска экрана</label>
-        <label class="check"><input type="checkbox" id="set-dmg"> Цифры урона</label>
-        <label class="check"><input type="checkbox" id="set-names"> Имена над танками</label>
-        <label class="check"><input type="checkbox" id="set-minimap"> Миникарта</label>
-        <label class="check"><input type="checkbox" id="set-fps"> Показывать FPS и пинг</label>
-        <button class="btn small" id="btn-fullscreen">⛶ Полный экран</button>
+        <label class="range"><span>Частицы <b id="set-particles-v"></b></span><input type="range" id="set-particles" min="25" max="100" step="5"></label>
+        <label class="range"><span>Масштаб камеры <b id="set-zoom-v"></b></span><input type="range" id="set-zoom" min="70" max="140" step="5"></label>
+        <label class="switch"><input type="checkbox" id="set-ff"><i></i>Опасные пули красные, безопасные зелёные</label>
+        <label class="switch"><input type="checkbox" id="set-shake"><i></i>Тряска экрана</label>
+        <label class="switch"><input type="checkbox" id="set-dmg"><i></i>Цифры урона</label>
+        <label class="switch"><input type="checkbox" id="set-names"><i></i>Имена над танками</label>
+        <label class="switch"><input type="checkbox" id="set-minimap"><i></i>Миникарта</label>
+        <label class="switch"><input type="checkbox" id="set-fps"><i></i>FPS и пинг</label>
+        <button class="btn small" id="btn-fullscreen">Полный экран</button>
       </div>
-      <div class="panel">
-        <h3>📱 Управление на телефоне</h3>
-        <div class="muted">Размер джойстиков</div>
+      <div class="card">
+        <div class="card-title">Управление на телефоне</div>
+        <div class="field-label">Размер джойстиков</div>
         <div class="seg" id="set-stick"></div>
-        <div class="muted" style="margin-top:10px">Помощь в прицеливании</div>
+        <div class="field-label">Помощь в прицеливании</div>
         <div class="seg" id="set-assist"></div>
-        <label class="check"><input type="checkbox" id="set-autofire"> Стрелять сразу при прицеливании (иначе — кнопка огня)</label>
-        <label class="check"><input type="checkbox" id="set-lefty"> Режим для левши (джойстики меняются местами)</label>
-        <label class="check"><input type="checkbox" id="set-autofs"> Полный экран при запуске игры</label>
+        <label class="switch"><input type="checkbox" id="set-autofire"><i></i>Стрелять при прицеливании</label>
+        <label class="switch"><input type="checkbox" id="set-lefty"><i></i>Режим для левши</label>
+        <label class="switch"><input type="checkbox" id="set-autofs"><i></i>Полный экран при запуске</label>
       </div>
     </div>
-    <div class="row"><button class="btn accent" data-go="back">✓ Готово</button></div>
   </div>
 </section>
 
 <!-- ================= КАК ИГРАТЬ ================= -->
 <section id="scr-help" class="screen" hidden>
-  <div class="menu-box wide help">
-    <h2>Как играть</h2>
-    <div class="help-grid">
-      <div class="panel">
-        <h3>Управление</h3>
-        <p><b>WASD / стрелки</b> — движение<br><b>Мышь</b> — прицел<br><b>ЛКМ / Пробел</b> — огонь<br><b>Tab</b> — таблица счёта<br><b>Enter</b> — чат (с друзьями)<br><b>1 / 2 / 3</b> — выбор улучшения (Выживание)<br><b>B</b> — магазин, <b>E</b> — поставить блок (Бедварс)<br><b>Esc</b> — меню / пауза<br><b>F</b> — полный экран</p>
-        <p><b>Телефон:</b> левая половина экрана — движение, правая — прицел и стрельба. Кнопки ☰ меню, 🏆 счёт, 🛒 магазин, ▣ блок — на экране.</p>
-        <h3 style="margin-top:14px">Режимы</h3>
-        <div id="help-modes"></div>
+  <div class="page wide">
+    <header class="page-head"><button class="icon-btn" data-go="main" aria-label="Назад"><svg><use href="#i-back"/></svg></button><h2>Как играть</h2></header>
+    <div class="page-body help-grid">
+      <div class="card">
+        <div class="card-title">Управление</div>
+        <dl class="keys">
+          <dt>WASD</dt><dd>движение</dd>
+          <dt>Мышь</dt><dd>прицел</dd>
+          <dt>ЛКМ / Пробел</dt><dd>огонь</dd>
+          <dt>Tab</dt><dd>таблица счёта</dd>
+          <dt>Enter</dt><dd>чат</dd>
+          <dt>1 · 2 · 3</dt><dd>улучшения в «Выживании»</dd>
+          <dt>B</dt><dd>магазин в «Бедварсе»</dd>
+          <dt>E / R</dt><dd>поставить блок / бомбу</dd>
+          <dt>Esc</dt><dd>меню и пауза</dd>
+          <dt>F</dt><dd>полный экран</dd>
+        </dl>
+        <p class="muted small">На телефоне: левая половина экрана — движение, правая — прицел и огонь.</p>
+        <div class="card-title mt">Режимы</div>
+        <div id="help-modes" class="help-list"></div>
       </div>
-      <div class="panel">
-        <h3>Усиления</h3>
-        <div id="help-boosts" class="boost-list"></div>
-        <p class="muted">Пули отскакивают от стен. Большая пуля уничтожает маленькую. Пули боссов обычные пули не сбивают.</p>
+      <div class="card">
+        <div class="card-title">Усиления</div>
+        <div id="help-boosts" class="help-list"></div>
+        <p class="muted small">Пули отскакивают от стен. Большая пуля сбивает обычную.</p>
       </div>
-      <div class="panel">
-        <h3>Враги кампании</h3>
-        <div id="help-enemies" class="boost-list"></div>
+      <div class="card">
+        <div class="card-title">Враги кампании</div>
+        <div id="help-enemies" class="help-list"></div>
       </div>
     </div>
-    <div class="row"><button class="btn accent" data-go="main">← Назад</button></div>
   </div>
 </section>
 
 <!-- ================= АДМИН ================= -->
 <section id="scr-admin" class="screen" hidden>
-  <div class="menu-box">
-    <h2 class="red">Админ-панель</h2>
-    <form id="admin-login">
-      <input type="text" name="username" value="admin" autocomplete="username" hidden>
-      <label class="field">Пароль <input type="password" id="admin-pass" autocomplete="current-password"></label>
-      <div id="admin-err" class="error" hidden>Неверный пароль</div>
-      <div class="row"><button type="button" class="btn" data-go="main">Отмена</button><button type="submit" class="btn accent" id="admin-enter">Войти</button></div>
-    </form>
-    <div id="admin-panel" hidden>
-      <p class="muted">Действует только в одиночной игре.</p>
-      <label class="field">Скорость игрока: <b id="adm-speed-v"></b><input type="range" id="adm-speed" min="1" max="20" step="0.5"></label>
-      <label class="field">Скорость пуль (x): <b id="adm-bullet-v"></b><input type="range" id="adm-bullet" min="0.5" max="5" step="0.1"></label>
-      <label class="field">Перезарядка (мс): <b id="adm-rate-v"></b><input type="range" id="adm-rate" min="50" max="1000" step="10"></label>
-      <label class="check"><input type="checkbox" id="adm-god"> Бессмертие</label>
-      <div class="row"><button class="btn" id="adm-reset">Сбросить</button><button class="btn accent" data-go="main">Назад</button></div>
+  <div class="page narrow">
+    <header class="page-head"><button class="icon-btn" data-go="main" aria-label="Назад"><svg><use href="#i-back"/></svg></button><h2>Админ-панель</h2></header>
+    <div class="page-body">
+      <form id="admin-login">
+        <input type="text" name="username" value="admin" autocomplete="username" hidden>
+        <label class="field">Пароль<input type="password" id="admin-pass" autocomplete="current-password"></label>
+        <div id="admin-err" class="error" hidden>Неверный пароль</div>
+        <button type="submit" class="btn primary wide" id="admin-enter">Войти</button>
+      </form>
+      <div id="admin-panel" hidden>
+        <p class="muted small">Действует только в одиночной игре.</p>
+        <label class="range"><span>Скорость игрока <b id="adm-speed-v"></b></span><input type="range" id="adm-speed" min="1" max="20" step="0.5"></label>
+        <label class="range"><span>Скорость пуль, × <b id="adm-bullet-v"></b></span><input type="range" id="adm-bullet" min="0.5" max="5" step="0.1"></label>
+        <label class="range"><span>Перезарядка, мс <b id="adm-rate-v"></b></span><input type="range" id="adm-rate" min="50" max="1000" step="10"></label>
+        <label class="switch"><input type="checkbox" id="adm-god"><i></i>Бессмертие</label>
+        <button class="btn" id="adm-reset">Сбросить</button>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ================= ИГРОВЫЕ ОВЕРЛЕИ ================= -->
+<!-- ================= ИГРОВЫЕ ЭЛЕМЕНТЫ ================= -->
 <div id="hud-upgrades" class="upgrades" hidden></div>
 <div id="hud-chat" class="game-chat" hidden></div>
-<form id="game-chat-form" class="game-chat-form" hidden><input id="game-chat-input" maxlength="140" placeholder="Сообщение (Enter — отправить, Esc — отмена)" autocomplete="off"></form>
+<form id="game-chat-form" class="game-chat-form" hidden><input id="game-chat-input" maxlength="140" placeholder="Сообщение — Enter, отмена — Esc" autocomplete="off"></form>
 <div id="scoreboard" class="scoreboard" hidden></div>
 <div id="shop" class="shop" hidden>
-  <div class="shop-head"><b>🛒 Магазин</b><span id="shop-coins"></span><button class="btn small" id="shop-close">✕</button></div>
-  <div id="shop-items" class="shop-items"></div>
-  <div class="muted small" id="shop-hint">Цифры 1–8 — быстро купить · B — закрыть</div>
+  <div class="shop-head">
+    <div class="shop-title">Магазин</div>
+    <div class="shop-bal"><svg class="ic sm"><use href="#i-gem"/></svg><span id="shop-coins">0</span></div>
+    <button class="icon-btn" id="shop-close" aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+  </div>
+  <div id="shop-items" class="shop-grid"></div>
+  <div class="shop-foot" id="shop-hint">Клавиши 1–9, 0, −, = · B — закрыть</div>
 </div>
-<button id="btn-touch-menu" class="touch-btn" hidden>☰</button>
-<button id="btn-touch-score" class="touch-btn score" hidden>🏆</button>
-<button id="tb-fire" class="act-btn fire" hidden>🔥</button>
-<button id="tb-block" class="act-btn block" hidden>▣</button>
-<button id="tb-shop" class="act-btn shopb" hidden>🛒</button>
-<div id="rotate-hint" class="rotate-hint" hidden>🔄 Поверните телефон горизонтально — так играть удобнее</div>
+<button id="btn-touch-menu" class="tbtn" hidden aria-label="Меню"><svg><use href="#i-menu"/></svg></button>
+<button id="btn-touch-score" class="tbtn score" hidden aria-label="Счёт"><svg><use href="#i-trophy"/></svg></button>
+<button id="tb-fire" class="act-btn fire" hidden aria-label="Огонь"><svg><use href="#i-fire"/></svg></button>
+<button id="tb-shop" class="act-btn a1" hidden aria-label="Магазин"><svg><use href="#i-cart"/></svg></button>
+<button id="tb-block" class="act-btn a2" hidden aria-label="Блок"><svg><use href="#i-block"/></svg></button>
+<button id="tb-bomb" class="act-btn a3" hidden aria-label="Бомба"><svg><use href="#i-bomb"/></svg></button>
 
 <section id="ov-pause" class="overlay" hidden>
-  <div class="menu-box">
+  <div class="dialog">
     <h2 id="pause-title">Пауза</h2>
-    <div class="btns">
-      <button class="btn big accent" id="pause-resume">▶ Продолжить</button>
-      <button class="btn" id="pause-restart">↻ Начать заново</button>
-      <button class="btn" id="pause-lobby">⏹ Завершить матч (в лобби)</button>
-      <button class="btn" id="pause-settings">⚙ Настройки</button>
-      <button class="btn dim" id="pause-exit">✕ Выйти в меню</button>
+    <div class="stack">
+      <button class="btn primary big wide" id="pause-resume"><svg class="ic"><use href="#i-play"/></svg>Продолжить</button>
+      <button class="btn wide" id="pause-restart">Начать заново</button>
+      <button class="btn wide" id="pause-lobby">Завершить матч</button>
+      <button class="btn wide" id="pause-settings">Настройки</button>
+      <button class="btn wide ghost" id="pause-exit">Выйти в меню</button>
     </div>
-    <div class="muted small" id="pause-info"></div>
+    <div class="muted small center" id="pause-info"></div>
   </div>
 </section>
 
 <section id="ov-result" class="overlay" hidden>
-  <div class="menu-box wide">
-    <h1 id="res-title" class="res-title">ПОБЕДА!</h1>
+  <div class="dialog wide">
+    <div id="res-title" class="res-title">ПОБЕДА</div>
     <div id="res-sub" class="res-sub"></div>
     <div id="res-board" class="res-board"></div>
     <div class="row" id="res-btns">
-      <button class="btn big accent" id="res-next">▶ Следующий уровень</button>
-      <button class="btn big" id="res-again">↻ Ещё раз</button>
+      <button class="btn primary big" id="res-next"><svg class="ic"><use href="#i-play"/></svg>Следующий уровень</button>
+      <button class="btn big" id="res-again">Ещё раз</button>
       <button class="btn" id="res-lobby">В лобби</button>
-      <button class="btn dim" id="res-exit">Выйти в меню</button>
+      <button class="btn ghost" id="res-exit">Выйти в меню</button>
     </div>
-    <div class="muted" id="res-wait">Ждём решения хоста…</div>
+    <div class="muted center" id="res-wait">Ждём решения хоста…</div>
   </div>
 </section>
 

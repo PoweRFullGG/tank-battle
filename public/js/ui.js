@@ -5,6 +5,7 @@
   const UI = TG.UI = {};
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const icon = (id, cls) => `<svg class="${cls || 'ic'}"><use href="#${id}"/></svg>`;
   UI.esc = esc;
 
   // ---------- Хранилище ----------
@@ -15,19 +16,22 @@
 
   const randomName = () => 'Танкист' + Math.floor(100 + Math.random() * 900);
   const isTouchDev = ('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  UI.settings = load('tbo_settings', {});
   UI.settings = Object.assign({
-    name: randomName(), colorName: 'Green', shape: 'Circle', volume: 70, sfx: 80, music: 40, vibrate: true,
-    quality: isTouchDev ? 'medium' : 'high', particles: 100, zoom: 100, shake: true, dmgNums: true, names: true, minimap: true, showFps: false,
-    stick: 'm', assist: 1, autoFire: true, lefty: false, autoFs: true
-  }, UI.settings);
+    name: randomName(), colorName: 'Green', shape: 'Circle', avatar: '', volume: 70, sfx: 80, music: 0, vibrate: true,
+    quality: isTouchDev ? 'medium' : 'high', particles: 100, zoom: 100, shake: true, dmgNums: true, names: true, minimap: true, showFps: false, ffBullets: true,
+    stick: 'm', assist: 1, autoFire: true, lefty: false, autoFs: true, v: 4
+  }, load('tbo_settings', {}));
+  if (UI.settings.v !== 4) { UI.settings.music = 0; UI.settings.ffBullets = true; UI.settings.v = 4; }
   if (!TG.PLAYER_COLORS[UI.settings.colorName]) UI.settings.colorName = 'Green';
   if (!TG.SHAPES.includes(UI.settings.shape)) UI.settings.shape = 'Circle';
   UI.admin = load('tbo_admin', { player_speed: 3, bullet_speed: 1.0, fire_rate: 470, god_mode: false });
   UI.progress = load('tbo_progress3', { stars: {}, bestWave: 0, bestLevel: 0, cdiff: 2 });
   UI.saveSettings = () => save('tbo_settings', UI.settings);
   UI.saveProgress = () => save('tbo_progress3', UI.progress);
-  UI.profile = () => ({ name: UI.settings.name, color: TG.PLAYER_COLORS[UI.settings.colorName], shape: UI.settings.shape });
+  UI.profile = () => ({ name: UI.settings.name, color: TG.PLAYER_COLORS[UI.settings.colorName], shape: UI.settings.shape, avatar: UI.settings.avatar || '' });
+  UI.saveSettings();
+
+  const MODE_ICONS = { levels: 'i-target', waves: 'i-waves', survival: 'i-star', arena: 'i-swords', ctf: 'i-flag', bedwars: 'i-shield', royale: 'i-crown' };
 
   // ---------- Экраны ----------
   const SCREENS = ['main', 'solo', 'multi', 'lobby', 'settings', 'help', 'admin'];
@@ -36,7 +40,7 @@
     if (name === 'settings' && UI.current !== 'settings' && UI.returnTo !== 'pause') UI.returnTo = UI.current;
     UI.current = name;
     for (const s of SCREENS) $('scr-' + s).hidden = s !== name;
-    if (name === 'main') drawPreview('main-preview');
+    if (name === 'main') UI.renderMain();
     if (name === 'settings') UI.renderSettings();
     if (name === 'solo') UI.renderSolo();
     if (name === 'multi') UI.renderMulti();
@@ -52,15 +56,20 @@
     t.textContent = text;
     t.hidden = false;
     clearTimeout(UI._toast);
-    UI._toast = setTimeout(() => { t.hidden = true; }, ms || 2800);
+    UI._toast = setTimeout(() => { t.hidden = true; }, ms || 2600);
   };
 
-  function drawPreview(id) {
+  function drawPreview(id, size) {
     const cv = $(id);
     if (!cv) return;
-    TG.Render.drawTankIcon(cv.getContext('2d'), UI.settings.shape, TG.PLAYER_COLORS[UI.settings.colorName], 26);
+    const S = UI.settings;
+    TG.Render.drawTankIcon(cv.getContext('2d'), S.shape, TG.PLAYER_COLORS[S.colorName], size || cv.width * 0.24, S.avatar, () => drawPreview(id, size));
   }
   UI.drawPreview = drawPreview;
+  UI.renderMain = function () {
+    drawPreview('main-preview', 22);
+    $('main-name').textContent = UI.settings.name;
+  };
 
   // ---------- Опции режимов ----------
   const DIFF_NAMES = ['Легко', 'Средне', 'Сложно', 'Эксперт'];
@@ -96,6 +105,7 @@
     row.appendChild(box);
     return row;
   }
+  function note(el, html) { const t = document.createElement('p'); t.className = 'hint'; t.innerHTML = html; el.appendChild(t); }
 
   function levelInfo(lv) {
     const L = TG.CAMPAIGN[lv - 1];
@@ -107,13 +117,12 @@
       const kd = TG.BOT_KINDS[TG.KIND[k]];
       enemies += `<span class="en"><i style="background:${rgb(kd.c)}"></i>${esc(kd.name)}${n ? ' ×' + n : ''}</span>`;
     }
-    const obj = L.obj === 'survive' ? `Продержитесь <b>${L.time} с</b>` : 'Уничтожьте всех врагов';
+    const obj = L.obj === 'survive' ? `Продержитесь ${L.time} секунд` : 'Уничтожьте всех врагов';
     const st = UI.progress.stars[lv] || 0;
-    d.innerHTML = `<b>${lv}. ${esc(L.n)}</b> ${st ? '<span style="color:#ffd23f">' + '★'.repeat(st) + '☆'.repeat(3 - st) + '</span>' : ''}<br>${obj}<br>${enemies}${L.tip ? '<br><span class="muted">💡 ' + esc(L.tip) + '</span>' : ''}`;
+    d.innerHTML = `<div class="ln">${lv}. ${esc(L.n)}${st ? `<span class="stars">${'★'.repeat(st)}${'☆'.repeat(3 - st)}</span>` : ''}</div><div class="muted">${obj}</div><div>${enemies}</div>${L.tip ? `<div class="muted small">${esc(L.tip)}</div>` : ''}`;
     return d;
   }
 
-  // Построение панели опций режима
   UI.buildOpts = function (el, mode, opts, onChange, ro, solo) {
     el.innerHTML = '';
     const set = (k, v) => { const o = Object.assign({}, opts, { [k]: v }); onChange(o); };
@@ -127,13 +136,17 @@
         const boss = L.e && L.e.some(([k]) => TG.BOT_KINDS[TG.KIND[k]].boss);
         b.className = 'btn' + (i === opts.level ? ' sel' : '') + (boss ? ' boss' : '') + (L.obj === 'survive' ? ' surv' : '');
         const st = solo ? UI.progress.stars[i] || 0 : 0;
-        b.innerHTML = (boss ? '☠' : L.obj === 'survive' ? '⏱' : '') + i + (st ? `<span class="st">${'★'.repeat(st)}</span>` : '');
+        b.innerHTML = i + '<span class="tag"></span>' + (st ? `<span class="st">${'★'.repeat(st)}</span>` : '');
         b.title = L.n;
         b.disabled = !!ro && i !== opts.level;
         if (!ro) b.onclick = () => { TG.Audio.play('click'); set('level', i); };
         grid.appendChild(b);
       }
       el.appendChild(grid);
+      const lg = document.createElement('div');
+      lg.className = 'legend';
+      lg.innerHTML = '<span><i style="background:#ff8a4c"></i>босс</span><span><i style="background:var(--accent)"></i>продержаться</span>';
+      el.appendChild(lg);
       el.appendChild(levelInfo(opts.level || 1));
     } else if (mode === 'ctf') {
       el.appendChild(seg('Танков в команде', [1, 2, 3, 4, 5, 6, 7, 8, 10], opts.teamSize, null, (v) => set('teamSize', v), ro));
@@ -144,30 +157,22 @@
       el.appendChild(seg('Формат', [false, true], !!opts.teams, (v) => v ? '2 команды' : 'Все против всех', (v) => set('teams', v), ro));
       el.appendChild(seg('Ботов', [0, 1, 2, 3, 4, 5, 6, 8], opts.bots, null, (v) => set('bots', v), ro));
       el.appendChild(seg('Сложность ботов', [1, 2, 3, 4], opts.diff, (v) => DIFF_NAMES[v - 1], (v) => set('diff', v), ro));
-      el.appendChild(seg(opts.teams ? 'Убийств до победы (x2 для команды)' : 'Убийств до победы', [5, 10, 20, 30], opts.kills, null, (v) => set('kills', v), ro));
+      el.appendChild(seg(opts.teams ? 'Убийств до победы (×2 команде)' : 'Убийств до победы', [5, 10, 20, 30], opts.kills, null, (v) => set('kills', v), ro));
     } else if (mode === 'bedwars') {
       el.appendChild(seg('Команд', [2, 4], opts.teams, null, (v) => set('teams', v), ro));
       el.appendChild(seg('Танков в команде', [1, 2, 3, 4], opts.size, null, (v) => set('size', v), ro));
       el.appendChild(seg('Сложность ботов', [1, 2, 3, 4], opts.diff, (v) => DIFF_NAMES[v - 1], (v) => set('diff', v), ro));
       el.appendChild(seg('Время матча', [10, 15, 20], opts.time, (v) => v + ' мин', (v) => set('time', v), ro));
-      const t = document.createElement('div'); t.className = 'muted small';
-      t.innerHTML = 'Пока ядро команды цело — вы возрождаетесь. Собирайте <b>кристаллы</b> у своего генератора и <b>алмазы</b> в центре, покупайте улучшения (B), ставьте блоки (E). Уничтожьте вражеские ядра!';
-      el.appendChild(t);
+      note(el, 'Пока ядро вашей команды цело, вы возрождаетесь. Кристаллы даёт генератор за пределами базы, алмазы — генераторы в центре. B — магазин, E — блок, R — бомба.');
     } else if (mode === 'royale') {
-      el.appendChild(seg('Всего танков (с ботами)', [6, 10, 16, 24], opts.total, null, (v) => set('total', v), ro));
+      el.appendChild(seg('Всего танков', [6, 10, 16, 24], opts.total, null, (v) => set('total', v), ro));
       el.appendChild(seg('Сложность ботов', [1, 2, 3, 4], opts.diff, (v) => DIFF_NAMES[v - 1], (v) => set('diff', v), ro));
       el.appendChild(seg('Скорость зоны', [false, true], !!opts.fast, (v) => v ? 'Быстрая' : 'Обычная', (v) => set('fast', v), ro));
-      const t = document.createElement('div'); t.className = 'muted small';
-      t.textContent = 'У всех 5 HP, возрождений нет. Вне зоны теряете здоровье. Собирайте усиления и выживите последним!';
-      el.appendChild(t);
+      note(el, 'У всех 5 HP, возрождений нет. Вне зоны теряется здоровье. Побеждает последний выживший.');
     } else if (mode === 'waves') {
-      const t = document.createElement('div'); t.className = 'muted small';
-      t.textContent = `Рекорд: ${UI.progress.bestWave} волн. Каждая 5-я волна — с боссом. С друзьями врагов больше, погибшие возвращаются в следующей волне.`;
-      el.appendChild(t);
+      note(el, `Рекорд: ${UI.progress.bestWave} волн. Каждая 5-я волна — с боссом. Погибшие друзья возвращаются в следующей волне.`);
     } else if (mode === 'survival') {
-      const t = document.createElement('div'); t.className = 'muted small';
-      t.textContent = `Рекорд: уровень ${UI.progress.bestLevel}. За уровни выбирайте улучшения (клавиши 1-3). Каждые 3 минуты — босс.`;
-      el.appendChild(t);
+      note(el, `Рекорд: уровень ${UI.progress.bestLevel}. За уровни выбирайте улучшения клавишами 1–3. Каждые 3 минуты — босс.`);
     }
   };
 
@@ -177,7 +182,7 @@
       const m = TG.MODE_INFO[id];
       const b = document.createElement('div');
       b.className = 'mode-card' + (id === cur ? ' sel' : '');
-      b.innerHTML = `<span class="ic">${m.icon}</span><b>${esc(m.name)}</b><span>${esc(m.desc)}</span>`;
+      b.innerHTML = `<div class="mode-ic">${icon(MODE_ICONS[id])}</div><div><b>${esc(m.name)}</b><span>${esc(m.desc)}</span></div>`;
       if (!ro) b.onclick = () => { TG.Audio.play('click'); onPick(id); };
       el.appendChild(b);
     }
@@ -198,12 +203,12 @@
     const st = $('multi-status');
     if (!TG.Net.available()) {
       st.className = 'status bad';
-      st.innerHTML = 'Игра открыта как файл. Для игры с друзьями запустите сервер<br>(<b>start.bat</b>) и откройте <b>http://localhost:3000</b>';
+      st.innerHTML = 'Игра открыта как файл. Чтобы играть с друзьями, запустите сервер (start.bat) и откройте http://localhost:3000';
       $('btn-create').disabled = $('btn-join').disabled = true;
     } else {
       $('btn-create').disabled = $('btn-join').disabled = false;
       st.className = 'status ' + (TG.Net.connected ? 'ok' : '');
-      st.textContent = TG.Net.connected ? '● Подключено к серверу' : 'Подключение к серверу…';
+      st.textContent = TG.Net.connected ? 'Подключено к серверу' : 'Подключение к серверу…';
       TG.Net.connect();
     }
   };
@@ -219,18 +224,19 @@
     if (!room) return;
     const me = TG.Game.myPid, isHost = room.host === me;
     $('lobby-code').textContent = room.code;
-    const link = location.origin + location.pathname + '#' + room.code;
-    $('lobby-link').textContent = link;
-    $('lobby-count').textContent = `(${room.members.filter((m) => !m.off).length}/${TG.C.MAX_PLAYERS})`;
+    $('lobby-link').textContent = location.origin + location.pathname + '#' + room.code;
+    $('lobby-count').textContent = `${room.members.filter((m) => !m.off).length}/${TG.C.MAX_PLAYERS}`;
     const nT = teamCount(room);
     const pl = $('lobby-players');
     pl.innerHTML = '';
     for (const m of room.members) {
       const d = document.createElement('div');
       d.className = 'pl' + (m.off ? ' off' : '');
+      const av = TG.Game.avatars.get(m.pid);
       const tc = TG.TEAM_COLORS[m.team];
-      const team = nT ? `<span class="tg" style="${m.team && m.team <= nT ? `background:${rgb(tc)}33;color:${rgb(tc)}` : ''}">${m.team && m.team <= nT ? TG.TEAM_NAMES[m.team].toLowerCase() : 'авто'}</span>` : '';
-      d.innerHTML = `<span class="sw" style="background:${rgb(m.color)}"></span><span class="nm">${m.pid === room.host ? '👑 ' : ''}${esc(m.name)}${m.pid === me ? ' (вы)' : ''}</span>${team}<span class="tg">${m.off ? 'нет связи' : (m.ping ? m.ping + ' мс' : '')}</span>`;
+      const inTeam = nT && m.team >= 1 && m.team <= nT;
+      const team = nT ? `<span class="tg" style="${inTeam ? `color:${rgb(tc)}` : ''}">${inTeam ? TG.TEAM_NAMES[m.team].toLowerCase() : 'авто'}</span>` : '';
+      d.innerHTML = `<span class="av" style="${av ? `background-image:url('${av}');` : `background:${rgb(m.color)};`}border-color:${rgb(m.color)}"></span><span class="nm">${esc(m.name)}${m.pid === me ? ' <span class="muted">(вы)</span>' : ''}</span>${m.pid === room.host ? '<span class="host">хост</span>' : ''}${team}<span class="tg">${m.off ? 'нет связи' : (m.ping ? m.ping + ' мс' : '—')}</span>`;
       pl.appendChild(d);
     }
     const tb = $('lobby-teams');
@@ -243,24 +249,24 @@
         const b = document.createElement('button');
         b.className = 'btn small' + (myM && (myM.team === tm || (tm === 0 && !(myM.team >= 1 && myM.team <= nT))) ? ' sel' : '');
         b.textContent = tm ? 'За ' + TG.TEAM_GEN[tm] : 'Авто';
-        if (tm) b.style.borderColor = rgb(TG.TEAM_COLORS[tm]);
+        if (tm) b.style.color = rgb(TG.TEAM_COLORS[tm]);
         b.onclick = () => TG.Net.send({ t: 'team', team: tm });
         tb.appendChild(b);
       }
     }
     modeCards($('lobby-mode'), room.mode, (m) => TG.Net.send({ t: 'setup', mode: m, opts: UI.defaultOpts(m, false) }), !isHost);
     UI.buildOpts($('lobby-opts'), room.mode, room.opts, (o) => TG.Net.send({ t: 'setup', mode: room.mode, opts: o }), !isHost, false);
-    $('lobby-mode-ro').textContent = isHost ? '' : 'Режим и настройки выбирает хост 👑';
+    $('lobby-mode-ro').textContent = isHost ? '' : 'Режим и настройки выбирает хост.';
     $('btn-start').hidden = !isHost;
     $('lobby-wait').hidden = isHost;
-    $('btn-start').textContent = room.state === 'lobby' ? '▶ Начать игру' : '⏳ Игра идёт…';
+    $('btn-start').lastChild.textContent = room.state === 'lobby' ? 'Начать игру' : 'Игра идёт…';
     $('btn-start').disabled = room.state !== 'lobby';
   };
 
   UI.chatLine = function (m) {
     const line = document.createElement('div');
     if (m.sys) { line.className = 'sys'; line.textContent = m.text; }
-    else line.innerHTML = `<b style="color:${rgb(m.color || [255, 255, 255])}">${esc(m.name)}:</b> ${esc(m.text)}`;
+    else line.innerHTML = `<b style="color:${rgb(m.color || [255, 255, 255])}">${esc(m.name)}</b> ${esc(m.text)}`;
     return line;
   };
   UI.addChat = function (m) {
@@ -286,7 +292,7 @@
     sw.innerHTML = '';
     for (const [name, c] of Object.entries(TG.PLAYER_COLORS)) {
       const b = document.createElement('button');
-      b.style.background = rgb(c); b.style.color = rgb(c);
+      b.style.background = rgb(c);
       b.title = TG.COLOR_RU[name];
       if (name === S.colorName) b.className = 'sel';
       b.onclick = () => { S.colorName = name; UI.applyProfile(); UI.renderSettings(); };
@@ -301,7 +307,7 @@
       b.onclick = () => { S.shape = s; UI.applyProfile(); UI.renderSettings(); };
       sh.appendChild(b);
     }
-    const setRange = (id, v, fmt) => { $(id).value = v; $(id + '-v').textContent = fmt ? fmt(v) : v + '%'; };
+    const setRange = (id, v) => { $(id).value = v; $(id + '-v').textContent = v + '%'; };
     setRange('set-volume', S.volume); setRange('set-sfx', S.sfx); setRange('set-music', S.music);
     setRange('set-particles', S.particles); setRange('set-zoom', S.zoom);
     $('set-vibrate').checked = S.vibrate;
@@ -311,30 +317,62 @@
     $('set-names').checked = S.names;
     $('set-dmg').checked = S.dmgNums;
     $('set-minimap').checked = S.minimap;
+    $('set-ff').checked = S.ffBullets;
     $('set-autofire').checked = S.autoFire;
     $('set-lefty').checked = S.lefty;
     $('set-autofs').checked = S.autoFs;
+    $('set-avatar-clear').hidden = !S.avatar;
     const stick = $('set-stick'); stick.innerHTML = '';
     for (const [k, nm] of [['s', 'Маленький'], ['m', 'Средний'], ['l', 'Большой']]) {
-      const b = document.createElement('button'); b.className = 'btn small' + (S.stick === k ? ' sel' : ''); b.textContent = nm;
+      const b = document.createElement('button'); b.className = 'btn' + (S.stick === k ? ' sel' : ''); b.textContent = nm;
       b.onclick = () => { S.stick = k; UI.saveSettings(); UI.applyGameSettings(); UI.renderSettings(); };
       stick.appendChild(b);
     }
     const as = $('set-assist'); as.innerHTML = '';
     for (const [k, nm] of [[0, 'Выкл'], [1, 'Слабая'], [2, 'Сильная']]) {
-      const b = document.createElement('button'); b.className = 'btn small' + (S.assist === k ? ' sel' : ''); b.textContent = nm;
+      const b = document.createElement('button'); b.className = 'btn' + (S.assist === k ? ' sel' : ''); b.textContent = nm;
       b.onclick = () => { S.assist = k; UI.saveSettings(); UI.applyGameSettings(); UI.renderSettings(); };
       as.appendChild(b);
     }
-    drawPreview('set-preview');
+    drawPreview('set-preview', 28);
+  };
+
+  // Аватар: картинка обрезается по центру до квадрата 96×96 и сжимается
+  UI.loadAvatar = function (file) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type)) { reject(new Error('Нужен файл картинки')); return; }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const tryEncode = (size, q) => {
+          const c = document.createElement('canvas');
+          c.width = c.height = size;
+          const g = c.getContext('2d');
+          const s = Math.min(img.naturalWidth, img.naturalHeight);
+          g.imageSmoothingQuality = 'high';
+          g.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, size, size);
+          let d = c.toDataURL('image/webp', q);
+          if (!/^data:image\/webp/.test(d)) d = c.toDataURL('image/jpeg', q);
+          return d;
+        };
+        let data = tryEncode(96, 0.82);
+        if (data.length > 22000) data = tryEncode(80, 0.7);
+        if (data.length > 22000) data = tryEncode(64, 0.6);
+        if (data.length > 23500) { reject(new Error('Картинка слишком сложная, попробуйте другую')); return; }
+        resolve(data);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Не удалось открыть картинку')); };
+      img.src = url;
+    });
   };
 
   UI.applyProfile = function () {
     UI.saveSettings();
     const p = UI.profile();
     TG.Net.profile = p;
-    if (TG.Net.connected) TG.Net.send({ t: 'profile', name: p.name, color: p.color, shape: p.shape });
-    drawPreview('main-preview');
+    if (TG.Net.connected) TG.Net.send({ t: 'profile', name: p.name, color: p.color, shape: p.shape, avatar: p.avatar });
+    UI.renderMain();
   };
 
   UI.applyGameSettings = function () {
@@ -344,7 +382,7 @@
     const R = TG.Render.settings;
     const qChanged = R.quality !== S.quality;
     R.quality = S.quality; R.showFps = S.showFps; R.shake = S.shake; R.names = S.names;
-    R.dmgNums = S.dmgNums; R.minimap = S.minimap; R.zoom = S.zoom / 100; R.particles = S.particles / 100;
+    R.dmgNums = S.dmgNums; R.minimap = S.minimap; R.zoom = S.zoom / 100; R.particles = S.particles / 100; R.ffBullets = !!S.ffBullets;
     const I = TG.Input.cfg;
     I.stick = STICKS[S.stick] || 70; I.leftHanded = !!S.lefty; I.autoFire = !!S.autoFire; I.aimAssist = S.assist | 0;
     document.body.classList.toggle('lefty', !!S.lefty);
@@ -372,10 +410,11 @@
     for (const k of TG.BOOSTS) {
       const info = TG.BOOST_INFO[k];
       const d = document.createElement('div');
-      const cv = document.createElement('canvas'); cv.width = cv.height = 22; cv.style.verticalAlign = '-5px'; cv.style.marginRight = '8px';
-      TG.Render.drawBoostIcon(cv.getContext('2d'), k, 22);
+      d.className = 'hi';
+      const cv = document.createElement('canvas'); cv.width = cv.height = 40;
+      TG.Render.drawBoostIcon(cv.getContext('2d'), k, 40);
       d.appendChild(cv);
-      const sp = document.createElement('span'); sp.innerHTML = `<b>${esc(info.name)}</b> — ${esc(info.desc)}`;
+      const sp = document.createElement('div'); sp.innerHTML = `<b>${esc(info.name)}</b><small>${esc(info.desc)}</small>`;
       d.appendChild(sp);
       bl.appendChild(d);
     }
@@ -383,17 +422,17 @@
     hm.innerHTML = '';
     for (const id of TG.MODE_LIST) {
       const m = TG.MODE_INFO[id];
-      const p = document.createElement('p');
-      p.innerHTML = `${m.icon} <b>${esc(m.name)}</b> — ${esc(m.desc)}`;
-      hm.appendChild(p);
+      const d = document.createElement('div'); d.className = 'hi';
+      d.innerHTML = `${icon(MODE_ICONS[id])}<div><b>${esc(m.name)}</b><small>${esc(m.desc)}</small></div>`;
+      hm.appendChild(d);
     }
     const he = $('help-enemies');
     he.innerHTML = '';
-    const desc = { scout: 'быстрый, хрупкий', soldier: 'стандартный боец, прячется за укрытиями', sniper: 'стреляет издалека очень быстрыми пулями и рикошетом', heavy: '5 HP, большие пули', gunner: 'стреляет очередями', rusher: 'бьёт дробью вплотную', medic: 'лечит союзников', elite: 'уклоняется от пуль, стреляет рикошетом', boss: 'кольцо пуль, веер, подкрепление', god: 'финальный босс' };
+    const desc = { scout: 'быстрый и хрупкий', soldier: 'стандартный боец, прячется за укрытиями', sniper: 'стреляет издалека очень быстрыми пулями и рикошетом', heavy: '5 HP, большие пули', gunner: 'стреляет очередями', rusher: 'бьёт дробью вплотную', medic: 'лечит союзников', elite: 'уклоняется от пуль, стреляет рикошетом', boss: 'веер, кольцо пуль, подкрепление', god: 'финальный босс' };
     for (const k of TG.BOT_KINDS) {
       if (!k || k.turret) continue;
-      const d = document.createElement('div');
-      d.innerHTML = `<i style="background:${rgb(k.c)}"></i><b>${esc(k.name)}</b> — ${esc(desc[k.key] || '')}`;
+      const d = document.createElement('div'); d.className = 'hi';
+      d.innerHTML = `<i style="background:${rgb(k.c)}"></i><div><b>${esc(k.name)}</b><small>${esc(desc[k.key] || '')}</small></div>`;
       he.appendChild(d);
     }
   };
@@ -403,10 +442,10 @@
     opts = opts || {};
     if (!rows || !rows.length) return '';
     const lvl = opts.mode === 'survival';
-    let h = `<table class="sb"><tr><th>Игрок</th>${lvl ? '<th class="n">Ур.</th>' : ''}<th class="n">Убийств</th><th class="n">Смертей</th><th class="n">Очки</th>${opts.pings ? '<th class="n">Пинг</th>' : ''}</tr>`;
+    let h = `<table class="sb"><tr><th>Игрок</th>${lvl ? '<th class="n">Ур.</th>' : ''}<th class="n">Убийства</th><th class="n">Смерти</th><th class="n">Очки</th>${opts.pings ? '<th class="n">Пинг</th>' : ''}</tr>`;
     for (const r of rows) {
       const ping = opts.pings && r.pid ? (opts.pings.get(r.pid) || '') : '';
-      h += `<tr class="${r.id === opts.meId ? 'me' : ''}"><td><span class="sw" style="background:${rgb(r.c)}"></span>${esc(r.name)}${r.bot ? ' <span class="muted small">бот</span>' : ''}${r.off ? ' <span class="muted small">(нет связи)</span>' : ''}</td>${lvl ? `<td class="n">${r.lvl}</td>` : ''}<td class="n">${r.k}</td><td class="n">${r.d}</td><td class="n">${r.s}</td>${opts.pings ? `<td class="n">${ping ? ping + ' мс' : ''}</td>` : ''}</tr>`;
+      h += `<tr class="${r.id === opts.meId ? 'me' : ''}"><td><span class="sw" style="background:${rgb(r.c)}"></span>${esc(r.name)}${r.bot ? ' <span class="muted small">бот</span>' : ''}${r.off ? ' <span class="muted small">нет связи</span>' : ''}</td>${lvl ? `<td class="n">${r.lvl}</td>` : ''}<td class="n">${r.k}</td><td class="n">${r.d}</td><td class="n">${r.s}</td>${opts.pings ? `<td class="n">${ping ? ping + ' мс' : ''}</td>` : ''}</tr>`;
     }
     return h + '</table>';
   };
@@ -414,19 +453,17 @@
   UI.showResult = function (res, ctx) {
     const t = $('res-title');
     t.textContent = res.title || '';
-    let col = ctx.win ? '#00ff7a' : ctx.draw ? '#ffd23f' : '#ff4b5c';
+    let col = ctx.win ? '#45d483' : ctx.draw ? '#ffc24b' : '#ff5d5d';
     if (res.winTeam) col = rgb(TG.TEAM_COLORS[res.winTeam]);
     t.style.color = col;
-    t.style.textShadow = `0 0 26px ${col}, 3px 3px 0 #000`;
     let sub = res.sub || '';
-    if (res.winTeam || res.winTank) sub += (sub ? ' · ' : '') + (ctx.win ? 'Вы победили!' : 'Вы проиграли');
-    if (res.stars) sub = '★'.repeat(res.stars) + '☆'.repeat(3 - res.stars) + '  ' + sub;
-    $('res-sub').textContent = sub;
+    if (res.winTeam || res.winTank) sub += (sub ? ' · ' : '') + (ctx.win ? 'Вы победили' : 'Вы проиграли');
+    $('res-sub').innerHTML = (res.stars ? `<span class="stars">${'★'.repeat(res.stars)}${'☆'.repeat(3 - res.stars)}</span><br>` : '') + esc(sub);
     $('res-board').innerHTML = UI.boardTable(res.board, { mode: ctx.mode, meId: ctx.meId });
     const canAct = ctx.local || ctx.isHost;
     $('res-next').hidden = !(canAct && res.next);
     $('res-again').hidden = !canAct;
-    $('res-again').textContent = ctx.mode === 'levels' && ctx.win ? '↻ Пройти ещё раз' : '↻ Ещё раз';
+    $('res-again').textContent = ctx.mode === 'levels' && ctx.win ? 'Пройти ещё раз' : 'Ещё раз';
     $('res-lobby').hidden = !(canAct && !ctx.local);
     $('res-wait').hidden = canAct;
     $('res-exit').textContent = ctx.local ? 'Выйти в меню' : 'Выйти из комнаты';
@@ -445,7 +482,7 @@
     if (key === lastUp) return;
     lastUp = key;
     if (!key) { el.hidden = true; el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="title">⭐ Улучшение! (осталось: ${pers.pend})</div>`;
+    el.innerHTML = `<div class="title">Новый уровень — выберите улучшение${pers.pend > 1 ? ` (ещё ${pers.pend})` : ''}</div>`;
     pers.opts.forEach((name, i) => {
       const b = document.createElement('button');
       b.className = 'btn';
@@ -458,6 +495,8 @@
   };
 
   // Магазин Бедварса
+  const SHOP_ICONS = { blocks: 'i-block', hblocks: 'i-block', bomb: 'i-bomb', walls: 'i-shield', armor: 'i-shield', dmg: 'i-target', rate: 'i-fire', speed: 'i-play', heal: 'i-star', shield: 'i-shield', turret: 'i-tank', forge: 'i-gear' };
+  const CAT_COL = ['#8aa4ff', '#45d483', '#ffc24b'];
   UI.shopOpen = false;
   let lastShop = '';
   UI.showShop = function (v) {
@@ -468,23 +507,35 @@
   };
   UI.renderShop = function (pers, onBuy) {
     if (!UI.shopOpen || !pers) return;
-    const key = JSON.stringify([pers.coins, pers.blocks, pers.bw]);
+    const key = JSON.stringify([pers.coins, pers.blocks, pers.hblocks, pers.bombs, pers.bw, pers.forge]);
     if (key === lastShop) return;
     lastShop = key;
-    $('shop-coins').textContent = '💎 ' + pers.coins;
+    $('shop-coins').textContent = pers.coins;
     const box = $('shop-items');
     box.innerHTML = '';
+    const cols = TG.SHOP_CATS.map((name, ci) => {
+      const col = document.createElement('div');
+      col.className = 'shop-col';
+      col.innerHTML = `<h4>${esc(name)}</h4>`;
+      box.appendChild(col);
+      return col;
+    });
     TG.SHOP.forEach((it, i) => {
-      const lvl = (pers.bw && pers.bw[it.key]) || 0;
+      const lvl = it.team ? (pers.forge || 0) : ((pers.bw && pers.bw[it.key]) || 0);
       const maxed = it.max && lvl >= it.max;
+      let owned = '';
+      if (it.key === 'blocks') owned = ` · есть ${pers.blocks}`;
+      if (it.key === 'hblocks') owned = ` · есть ${pers.hblocks || 0}`;
+      if (it.key === 'bomb') owned = ` · есть ${pers.bombs || 0}`;
+      let pips = '';
+      if (it.max) { pips = '<span class="pips">'; for (let k = 0; k < it.max; k++) pips += `<i class="${k < lvl ? 'on' : ''}"></i>`; pips += '</span>'; }
       const b = document.createElement('button');
       b.className = 'shop-item' + (maxed || pers.coins < it.price ? ' na' : '');
-      b.innerHTML = `<kbd>${i + 1}</kbd><span class="nm">${esc(it.name)}${it.max ? ` <span class="muted">(${lvl}/${it.max})</span>` : ''}<small>${esc(it.desc)}</small></span><span class="pr">${maxed ? 'MAX' : '💎 ' + it.price}</span>`;
+      b.innerHTML = `<span class="key">${TG.SHOP_KEYS[i] === '-' ? '−' : TG.SHOP_KEYS[i]}</span><span class="si" style="color:${CAT_COL[it.cat]}">${icon(SHOP_ICONS[it.key] || 'i-star')}</span><span class="nm"><b>${esc(it.name)}${pips}</b><small>${esc(it.desc)}${owned}</small></span><span class="pr">${maxed ? 'макс.' : icon('i-gem') + it.price}</span>`;
       b.onclick = (e) => { e.stopPropagation(); if (performance.now() - UI.shopOpenedAt < 450) return; onBuy(i); };
       b.onpointerdown = (e) => e.stopPropagation();
-      box.appendChild(b);
+      cols[it.cat].appendChild(b);
     });
-    $('shop-hint').hidden = TG.Input.isTouch;
   };
 
   UI.resetInGame = function () {

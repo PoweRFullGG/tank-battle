@@ -254,6 +254,12 @@ function cleanColor(c) {
   return [0, 255, 100];
 }
 function cleanShape(s) { return TG.SHAPES.includes(s) ? s : 'Circle'; }
+// Аватарка: маленькая картинка data:image/...;base64 (до ~24 КБ)
+function cleanAvatar(a) {
+  if (typeof a !== 'string' || !a) return '';
+  if (a.length > 24000) return '';
+  return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(a) ? a : '';
+}
 
 function cleanOpts(mode, o) {
   o = o && typeof o === 'object' ? o : {};
@@ -288,10 +294,16 @@ class Room {
   info() {
     return {
       t: 'room', code: this.code, host: this.host, mode: this.mode, opts: this.opts, state: this.state,
-      members: Array.from(this.members.values()).map((m) => ({ pid: m.pid, name: m.name, color: m.color, shape: m.shape, team: m.team, off: m.conn ? 0 : 1, ping: m.ping | 0 }))
+      members: Array.from(this.members.values()).map((m) => ({ pid: m.pid, name: m.name, color: m.color, shape: m.shape, team: m.team, off: m.conn ? 0 : 1, ping: m.ping | 0, av: m.avatar ? 1 : 0 }))
     };
   }
   broadcastInfo() { this.broadcast(JSON.stringify(this.info())); }
+  // Аватарки: новому участнику — все, остальным — его
+  syncAvatars(m) {
+    for (const o of this.members.values()) if (o !== m && o.avatar && m.conn) m.conn.ws.send(JSON.stringify({ t: 'avatar', pid: o.pid, a: o.avatar }));
+    this.broadcastAvatar(m);
+  }
+  broadcastAvatar(m) { this.broadcast(JSON.stringify({ t: 'avatar', pid: m.pid, a: m.avatar || '' })); }
   broadcast(str) { for (const m of this.members.values()) if (m.conn) m.conn.ws.send(str); }
   sys(text) { this.say({ t: 'chat', sys: 1, text }); }
   say(msg) {
@@ -303,13 +315,14 @@ class Room {
   addMember(client) {
     const m = {
       pid: allocPid(), token: crypto.randomBytes(12).toString('hex'), name: client.name, color: client.color,
-      shape: client.shape, team: 0, conn: client, ping: 0, offSince: 0
+      shape: client.shape, team: 0, conn: client, ping: 0, offSince: 0, avatar: client.avatar || ''
     };
     this.members.set(m.pid, m);
     if (!this.host) this.host = m.pid;
     client.room = this; client.member = m;
     client.ws.send(JSON.stringify({ t: 'joined', code: this.code, pid: m.pid, token: m.token }));
     for (const c of this.chat) client.ws.send(JSON.stringify(c));
+    this.syncAvatars(m);
     this.sys(`${m.name} присоединился`);
     if (this.world && this.state !== 'lobby') {
       this.world.addPlayer({ id: m.pid, name: m.name, color: m.color, shape: m.shape, team: m.team });
@@ -325,6 +338,7 @@ class Room {
     m.conn = client; m.offSince = 0;
     client.room = this; client.member = m;
     client.ws.send(JSON.stringify({ t: 'joined', code: this.code, pid: m.pid, token: m.token }));
+    this.syncAvatars(m);
     if (this.world && this.state !== 'lobby') {
       const p = this.world.players.get(m.pid);
       if (p) { p.connected = true; p.inputs.length = 0; p.ackSeq = 0; p.credits = 0; }
@@ -401,7 +415,9 @@ class Room {
       this.broadcast(JSON.stringify({ t: 'end', result: this.result }));
       this.broadcastInfo();
     }
-    if (w.tick % (w.over && this.state === 'post' && this.postTimer === 0 ? 12 : C.SNAP_EVERY) === 0) this.sendSnapshots();
+    // до 4 игроков — снапшоты 60 раз в секунду (меньше задержка), больше — 30
+    const every = w.over && this.state === 'post' && this.postTimer === 0 ? 12 : (this.connected() <= 4 ? 1 : C.SNAP_EVERY);
+    if (w.tick % every === 0) this.sendSnapshots();
   }
 
   sendSnapshots() {
@@ -455,7 +471,7 @@ function stripEvent(e) {
 // =====================================================================
 function onConnection(ws, req) {
   const client = {
-    ws, name: 'Игрок', color: [0, 255, 100], shape: 'Circle', room: null, member: null,
+    ws, name: 'Игрок', color: [0, 255, 100], shape: 'Circle', avatar: '', room: null, member: null,
     lastSeen: Date.now(), lastChat: 0, lastHud: '', lastPers: '', sbTick: 0, msgs: 0, msgWindow: Date.now()
   };
   clients.add(client);
@@ -501,16 +517,25 @@ function handle(client, msg) {
   switch (msg.t) {
     case 'ping':
       send(client, { t: 'pong', c: msg.c });
-      if (me && Number.isFinite(msg.rtt)) me.ping = Math.max(0, Math.min(9999, msg.rtt | 0));
+      if (me && Number.isFinite(msg.rtt)) {
+        me.ping = Math.max(0, Math.min(9999, msg.rtt | 0));
+        // компенсация пинга: на сколько тиков «отматывать» цели для пуль этого игрока
+        const d = Number.isFinite(msg.d) ? Math.max(0, Math.min(14, msg.d)) : 4;
+        const rw = Math.max(0, Math.min(12, Math.round(me.ping / C.TICK_MS + d)));
+        me.rewind = rw;
+        if (room && room.world) { const p = room.world.players.get(me.pid); if (p) p.rewind = rw; }
+      }
       break;
     case 'hello':
     case 'profile': {
       client.name = cleanName(msg.name);
       client.color = cleanColor(msg.color);
       client.shape = cleanShape(msg.shape);
+      if ('avatar' in msg) client.avatar = cleanAvatar(msg.avatar);
       if (room && me) {
         me.name = client.name; me.color = client.color; me.shape = client.shape;
         if (room.world) room.world.updatePlayerProfile(me.pid, { name: me.name, color: me.color, shape: me.shape });
+        if (me.avatar !== client.avatar) { me.avatar = client.avatar; room.broadcastAvatar(me); }
         room.broadcastInfo();
       }
       break;
@@ -534,7 +559,7 @@ function handle(client, msg) {
       if (room) leaveRoom(client);
       if (msg.token) {
         for (const m of r.members.values()) {
-          if (m.token === msg.token) { m.name = client.name; m.color = client.color; m.shape = client.shape; r.reattach(client, m); return; }
+          if (m.token === msg.token) { m.name = client.name; m.color = client.color; m.shape = client.shape; m.avatar = client.avatar; r.reattach(client, m); return; }
         }
       }
       if (r.connected() >= C.MAX_PLAYERS) return send(client, { t: 'error', msg: 'Комната заполнена (макс. ' + C.MAX_PLAYERS + ')' });

@@ -6,9 +6,10 @@
   let canvas, ctx, dpr = 1, cw = 0, ch = 0;
   const cam = { x: 400, y: 300, scale: 1, sx: 0, sy: 0, shake: 0, init: false };
   R.cam = cam;
-  R.settings = { quality: 'high', showFps: false, shake: true, names: true, dmgNums: true, minimap: true, zoom: 1, particles: 1 };
+  R.settings = { quality: 'high', showFps: false, shake: true, names: true, dmgNums: true, minimap: true, zoom: 1, particles: 1, ffBullets: true };
 
   const TAU = Math.PI * 2;
+  const FONT = "'Rubik', system-ui, 'Segoe UI', sans-serif";
   const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   const colorCache = new Map();
@@ -36,6 +37,24 @@
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
   };
+
+  // ---------- Аватарки ----------
+  const avatarCache = new Map();
+  function avatarImg(data, onload) {
+    if (!data) return null;
+    let e = avatarCache.get(data);
+    if (!e) {
+      const img = new Image();
+      e = { img, ok: false, cbs: [] };
+      img.onload = () => { e.ok = true; for (const cb of e.cbs) cb(); e.cbs.length = 0; };
+      img.src = data;
+      avatarCache.set(data, e);
+      if (avatarCache.size > 40) avatarCache.delete(avatarCache.keys().next().value);
+    }
+    if (!e.ok && onload) e.cbs.push(onload);
+    return e.ok ? e.img : null;
+  }
+  R.avatarImg = avatarImg;
 
   // ---------- Спрайты свечения ----------
   const glowCache = new Map();
@@ -202,21 +221,38 @@
     }
   }
 
-  R.drawTankIcon = function (c2d, shape, color, size) {
+  // Корпус танка: цвет или аватарка, вписанная в форму
+  function hull(shape, x, y, r, rot, color, img, outline) {
+    shapePath(shape, x, y, r, rot);
+    if (img) {
+      ctx.save();
+      ctx.clip();
+      ctx.fillStyle = rgb(color); ctx.fill();
+      const s = r * 2.7;
+      ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
+      ctx.restore();
+      shapePath(shape, x, y, r, rot);
+      ctx.lineWidth = 3; ctx.strokeStyle = outline || rgb(color); ctx.stroke();
+    } else {
+      ctx.fillStyle = rgb(color); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = outline || '#000'; ctx.stroke();
+    }
+  }
+
+  R.drawTankIcon = function (c2d, shape, color, size, avatar, onload) {
     const saved = ctx; ctx = c2d;
     const W = c2d.canvas.width, H = c2d.canvas.height;
     c2d.clearRect(0, 0, W, H);
-    const r = size || W * 0.22, x = W / 2 - r * 0.2, y = H / 2;
+    const r = size || W * 0.22, x = W / 2 - r * 0.25, y = H / 2;
+    const img = avatarImg(avatar, onload);
     c2d.globalCompositeOperation = 'lighter';
-    c2d.drawImage(glowSprite(color), x - r * 2.4, y - r * 2.4, r * 4.8, r * 4.8);
+    c2d.drawImage(glowSprite(color), x - r * 2.2, y - r * 2.2, r * 4.4, r * 4.4);
     c2d.globalCompositeOperation = 'source-over';
-    shapePath(shape, x, y, r, 0);
-    c2d.fillStyle = rgb(color); c2d.fill();
-    c2d.lineWidth = 3; c2d.strokeStyle = '#000'; c2d.stroke();
     c2d.lineCap = 'round';
-    c2d.beginPath(); c2d.moveTo(x, y); c2d.lineTo(x + r * 1.6, y);
-    c2d.strokeStyle = '#000'; c2d.lineWidth = 10; c2d.stroke();
-    c2d.strokeStyle = rgb(color); c2d.lineWidth = 5; c2d.stroke();
+    c2d.beginPath(); c2d.moveTo(x, y); c2d.lineTo(x + r * 1.65, y);
+    c2d.strokeStyle = '#000'; c2d.lineWidth = r * 0.42; c2d.stroke();
+    c2d.strokeStyle = rgb(color); c2d.lineWidth = r * 0.22; c2d.stroke();
+    hull(shape, x, y, r, 0, color, img, img ? rgb(color) : '#000');
     ctx = saved;
   };
 
@@ -249,12 +285,10 @@
     const col = cstr(c);
     const r = t.r, x = t.x, y = t.y, f = t.f;
     const k = kindOf(t);
-    const hostileToMe = scene.meTeam == null ? true : (scene.meTeam === 0 || t.team !== scene.meTeam);
-    let alpha = 1;
-    if (f & F.invis) alpha = t.me || !hostileToMe ? 0.45 : 0.1;
-    ctx.globalAlpha = alpha;
-    if (high && alpha > 0.3) glow(c, x, y, r * 2.3, (f & F.damage) ? 0.6 : 0.35);
-    if (f & F.damage && high) glow([255, 30, 30], x, y, r * 1.9, 0.35 * alpha);
+    const pl = t.pid ? scene.players.get(t.pid) : null;
+    const img = pl && pl.avatar ? avatarImg(pl.avatar) : null;
+    if (high) glow(c, x, y, r * 2.3, (f & F.damage) ? 0.6 : 0.35);
+    if ((f & F.damage) && high) glow([255, 30, 30], x, y, r * 1.9, 0.35);
     if (k && k.boss && high) glow(c, x, y, r * 3.2, 0.25);
     if (f & F.shield) {
       const pulse = 0.5 + 0.5 * Math.sin(now * 0.012);
@@ -262,13 +296,11 @@
       ctx.fillStyle = rgba(c, 0.12 + pulse * 0.12); ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = rgba([255, 255, 140], 0.5 + pulse * 0.4); ctx.stroke();
     }
-    if ((f & F.iframe) && Math.floor(now / 90) % 2 === 0) ctx.globalAlpha = alpha * 0.35;
-    // турель — основание
+    if ((f & F.iframe) && Math.floor(now / 90) % 2 === 0) ctx.globalAlpha = 0.35;
     if (k && k.turret) {
       ctx.beginPath(); ctx.arc(x, y, r * 1.25, 0, TAU);
       ctx.fillStyle = '#2a2e45'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = col; ctx.stroke();
     }
-    // шипы босса
     if (k && k.boss) {
       ctx.beginPath();
       for (let i = 0; i < 12; i++) {
@@ -278,11 +310,7 @@
       }
       ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.stroke();
     }
-    const rot = k && k.turret ? 0 : t.a;
-    shapePath(tankShape(scene, t), x, y, r, rot);
-    ctx.fillStyle = col; ctx.fill();
-    ctx.lineWidth = k && k.elite ? 3 : 2; ctx.strokeStyle = k && k.elite ? '#ffd23f' : '#000'; ctx.stroke();
-    // стволы
+    // стволы рисуются под корпусом, чтобы аватарка была видна целиком
     ctx.lineCap = 'round';
     let bl = r * 1.6, bw = 4;
     if (k) { if (k.longBarrel) { bl = r * 2.3; bw = 3; } if (k.bsize > 1.3) { bw = 8; bl = r * 1.4; } if (k.boss) bl = r * 1.5; }
@@ -301,9 +329,14 @@
       ctx.beginPath(); ctx.arc(tip[0], tip[1], 4 + Math.sin(now * 0.05) * 1.5, 0, TAU);
       ctx.strokeStyle = '#ff64ff'; ctx.lineWidth = 2; ctx.stroke();
     }
-    // центр / значки
-    ctx.beginPath(); ctx.arc(x, y, r * 0.32, 0, TAU);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
+    const rot = k && k.turret ? 0 : t.a;
+    // в командных режимах обводка аватарки — цвет команды
+    const outline = img ? col : (k && k.elite ? '#ffd23f' : '#000');
+    hull(tankShape(scene, t), x, y, r, rot, c, img, outline);
+    if (!img) {
+      ctx.beginPath(); ctx.arc(x, y, r * 0.32, 0, TAU);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
+    }
     if (k && k.heal) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(x - r * 0.12, y - r * 0.4, r * 0.24, r * 0.8);
@@ -353,26 +386,25 @@
     const c = tankColor(scene, t);
     const r = t.r, x = t.x, y = t.y;
     const k = kindOf(t);
-    if ((t.f & F.invis) && !t.me && (scene.meTeam === 0 || t.team !== scene.meTeam)) return;
+    const inv = 1 / Math.max(0.6, cam.scale);
     let top = y - r - (k && k.boss ? 20 : 10);
     if (t.maxHp > 1) {
       const w = k && k.boss ? 90 : Math.max(34, Math.min(70, t.maxHp * 10)), h = k && k.boss ? 7 : 5;
       const bx = x - w / 2, by = top - 4;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(bx - 1, by - 1, w + 2, h + 2);
-      ctx.fillStyle = '#5a0f14'; ctx.fillRect(bx, by, w, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(bx - 1, by - 1, w + 2, h + 2);
       const kk = Math.max(0, t.hp / t.maxHp);
-      ctx.fillStyle = kk > 0.6 ? '#2cff6e' : kk > 0.3 ? '#ffd23f' : '#ff4155';
+      ctx.fillStyle = kk > 0.6 ? '#45d483' : kk > 0.3 ? '#ffc24b' : '#ff5d5d';
       ctx.fillRect(bx, by, w * kk, h);
       top = by - 4;
     }
-    let label = null;
-    if (t.pid && !t.me && R.settings.names) { const p = scene.players.get(t.pid); label = p ? p.name : null; }
-    else if (k && (k.boss || scene.info.mode === 'survival' || scene.info.mode === 'levels')) label = k.name;
-    if (label) {
-      ctx.font = `bold ${Math.round(12 / Math.max(0.6, cam.scale))}px system-ui, sans-serif`;
+    let text = null;
+    if (t.pid && !t.me && R.settings.names) { const p = scene.players.get(t.pid); text = p ? p.name : null; }
+    else if (k && (k.boss || scene.info.mode === 'survival' || scene.info.mode === 'levels')) text = k.name;
+    if (text) {
+      ctx.font = `600 ${Math.round(12 * inv)}px ${FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.strokeText(label, x, top);
-      ctx.fillStyle = t.pid ? cstr(c) : 'rgba(255,190,190,0.9)'; ctx.fillText(label, x, top);
+      ctx.lineWidth = 3 * inv; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineJoin = 'round'; ctx.strokeText(text, x, top);
+      ctx.fillStyle = t.pid ? cstr(c) : 'rgba(255,200,200,0.9)'; ctx.fillText(text, x, top);
     }
   }
 
@@ -384,7 +416,7 @@
     const sy = Math.max(0, Math.floor(y0 / step) * step), ey = Math.min(H, y1);
     for (let x = sx; x <= ex; x += step) { ctx.moveTo(x, Math.max(0, y0)); ctx.lineTo(x, Math.min(H, y1)); }
     for (let y = sy; y <= ey; y += step) { ctx.moveTo(Math.max(0, x0), y); ctx.lineTo(Math.min(W, x1), y); }
-    ctx.strokeStyle = 'rgba(70,78,120,0.35)';
+    ctx.strokeStyle = 'rgba(70,78,120,0.3)';
     ctx.lineWidth = 1 / cam.scale;
     ctx.stroke();
   }
@@ -404,15 +436,15 @@
       if (o.x > x1 || o.x + o.w < x0 || o.y > y1 || o.y + o.h < y0) continue;
       roundRectPath(o.x, o.y, o.w, o.h, 6);
     }
-    ctx.fillStyle = '#4a4f72';
+    ctx.fillStyle = '#434866';
     ctx.fill();
-    ctx.strokeStyle = '#2a2d45'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.strokeStyle = '#272a40'; ctx.lineWidth = 3; ctx.stroke();
     ctx.beginPath();
     for (const o of obs) {
       if (o.x > x1 || o.x + o.w < x0 || o.y > y1 || o.y + o.h < y0) continue;
       ctx.rect(o.x + 4, o.y + 3, o.w - 8, Math.min(6, o.h * 0.15));
     }
-    ctx.fillStyle = 'rgba(160,170,230,0.22)';
+    ctx.fillStyle = 'rgba(160,170,230,0.18)';
     ctx.fill();
   }
 
@@ -432,14 +464,16 @@
         ctx.beginPath(); ctx.arc(cx, cy, 6, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
         const w = 70, bx = cx - w / 2, by = o.y - 16;
         ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(bx - 1, by - 1, w + 2, 8);
-        ctx.fillStyle = k > 0.5 ? cstr(c) : k > 0.25 ? '#ffd23f' : '#ff4155'; ctx.fillRect(bx, by, w * k, 6);
+        ctx.fillStyle = k > 0.5 ? cstr(c) : k > 0.25 ? '#ffc24b' : '#ff5d5d'; ctx.fillRect(bx, by, w * k, 6);
       } else {
-        ctx.fillStyle = '#23263d';
+        const heavy = o.maxHp > 6;
+        ctx.fillStyle = heavy ? '#2c3045' : '#23263d';
         ctx.fillRect(o.x + 1, o.y + 1, o.w - 2, o.h - 2);
-        ctx.fillStyle = rgba(c, 0.35 + 0.35 * k);
+        ctx.fillStyle = rgba(c, (heavy ? 0.55 : 0.35) + 0.3 * k);
         ctx.fillRect(o.x + 5, o.y + 5, o.w - 10, o.h - 10);
-        ctx.lineWidth = 2; ctx.strokeStyle = cstr(c);
+        ctx.lineWidth = heavy ? 3 : 2; ctx.strokeStyle = heavy ? '#d9dcea' : cstr(c);
         ctx.strokeRect(o.x + 2, o.y + 2, o.w - 4, o.h - 4);
+        if (heavy) { ctx.strokeStyle = cstr(c); ctx.lineWidth = 2; ctx.strokeRect(o.x + 9, o.y + 9, o.w - 18, o.h - 18); }
         if (k < 0.99) {
           ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 2;
           ctx.beginPath();
@@ -455,14 +489,20 @@
   function drawPads(scene, now, high) {
     const pads = scene.info.pads;
     if (!pads) return;
+    const inv = 1 / Math.max(0.6, cam.scale);
     for (const p of pads) {
-      const c = p.gen === 'gem' ? TG.ITEMS.gem.c : (TG.TEAM_COLORS[p.team] || TG.ITEMS.crystal.c);
-      if (high) glow(c, p.x, p.y, 50, 0.25);
-      ctx.beginPath(); ctx.arc(p.x, p.y, 30, 0, TAU);
-      ctx.fillStyle = 'rgba(10,12,24,0.6)'; ctx.fill();
+      const gem = p.gen === 'gem';
+      const c = gem ? TG.ITEMS.gem.c : (TG.TEAM_COLORS[p.team] || TG.ITEMS.crystal.c);
+      if (high) glow(c, p.x, p.y, 54, 0.22);
+      ctx.beginPath(); ctx.arc(p.x, p.y, 32, 0, TAU);
+      ctx.fillStyle = 'rgba(10,12,24,0.65)'; ctx.fill();
       ctx.setLineDash([6, 6]); ctx.lineDashOffset = -now * 0.02;
       ctx.lineWidth = 2; ctx.strokeStyle = cstr(c); ctx.stroke();
       ctx.setLineDash([]);
+      ctx.font = `600 ${Math.round(10 * inv)}px ${FONT}`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillStyle = rgba(c, 0.75);
+      ctx.fillText(gem ? 'АЛМАЗЫ' : 'КРИСТАЛЛЫ', p.x, p.y + 36);
     }
   }
 
@@ -478,7 +518,7 @@
       case 'health': ctx.fillRect(x - s * 0.1, y - s * 0.38, s * 0.2, s * 0.76); ctx.fillRect(x - s * 0.38, y - s * 0.1, s * 0.76, s * 0.2); break;
       case 'triple':
         ctx.beginPath();
-        for (const a of [-0.5, 0, 0.5]) { ctx.moveTo(x - s * 0.3, y + s * 0.1); ctx.lineTo(x - s * 0.3 + Math.cos(a - 0.3) * s * 0.75, y + s * 0.1 + Math.sin(a - 1.2) * s * 0.45); }
+        for (const a of [-0.45, 0, 0.45]) { ctx.moveTo(x - s * 0.35, y + s * 0.25); ctx.lineTo(x - s * 0.35 + Math.cos(a - 0.6) * s * 0.75, y + s * 0.25 + Math.sin(a - 0.6) * s * 0.75); }
         ctx.stroke(); break;
       case 'homing':
         ctx.beginPath(); ctx.arc(x, y, s * 0.36, 0, TAU); ctx.moveTo(x - s * 0.5, y); ctx.lineTo(x + s * 0.5, y); ctx.moveTo(x, y - s * 0.5); ctx.lineTo(x, y + s * 0.5); ctx.stroke(); break;
@@ -487,9 +527,6 @@
       case 'emp':
         ctx.beginPath(); ctx.arc(x, y, s * 0.15, 0, TAU); ctx.fill();
         ctx.beginPath(); ctx.arc(x, y, s * 0.3, -1, 1); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, s * 0.3, 2.1, 4.2); ctx.stroke(); break;
-      case 'invis':
-        ctx.beginPath(); ctx.ellipse(x, y, s * 0.42, s * 0.22, 0, 0, TAU); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, s * 0.1, 0, TAU); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(x - s * 0.4, y + s * 0.35); ctx.lineTo(x + s * 0.4, y - s * 0.35); ctx.stroke(); break;
     }
   }
   R.drawBoostIcon = function (c2d, type, size) {
@@ -497,8 +534,8 @@
     const W = c2d.canvas.width;
     c2d.clearRect(0, 0, W, W);
     const info = TG.BOOST_INFO[type];
-    c2d.beginPath(); roundRectPath(2, 2, W - 4, W - 4, 5); c2d.fillStyle = rgb(info.c); c2d.fill();
-    drawBoostIcon(type, W / 2, W / 2, (size || W) * 0.7);
+    c2d.beginPath(); roundRectPath(2, 2, W - 4, W - 4, W * 0.22); c2d.fillStyle = rgb(info.c); c2d.fill();
+    drawBoostIcon(type, W / 2, W / 2, (size || W) * 0.66);
     ctx = saved;
   };
 
@@ -508,9 +545,20 @@
     ctx.fillStyle = cstr(c); ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff'; ctx.stroke();
   }
 
+  function drawBomb(b, now) {
+    const blink = Math.floor(now / 110) % 2 === 0;
+    glow([255, 150, 60], b.x, b.y, 34, blink ? 0.6 : 0.25);
+    ctx.beginPath(); ctx.arc(b.x, b.y, TG.BOMB_RADIUS, 0, TAU);
+    ctx.setLineDash([8, 8]); ctx.strokeStyle = 'rgba(255,150,60,0.35)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(b.x, b.y, 11, 0, TAU);
+    ctx.fillStyle = '#1b1d25'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = blink ? '#ff9a3c' : '#6b6f80'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, TAU); ctx.fillStyle = blink ? '#ff5d5d' : '#5a2020'; ctx.fill();
+  }
+
   function drawBoosts(boosts, now, high, x0, y0, x1, y1) {
     for (const b of boosts) {
       if (b.x < x0 || b.x > x1 || b.y < y0 || b.y > y1) continue;
+      if (b.type === TG.BOMB_ID) { drawBomb(b, now); continue; }
       if (b.type >= 20) {
         const item = TG.ITEMS[TG.itemById(b.type)];
         if (!item) continue;
@@ -560,11 +608,10 @@
     const bullets = scene.bullets;
     if (high) {
       ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.55;
       for (const b of bullets) {
         const s = b.size * 3.2;
-        ctx.globalAlpha = 0.55;
         ctx.drawImage(glowSprite(b.c), b.x - s, b.y - s, s * 2, s * 2);
-        if (b.fl & 4) { ctx.globalAlpha = 0.5; ctx.drawImage(glowSprite([255, 40, 40]), b.x - s * 1.2, b.y - s * 1.2, s * 2.4, s * 2.4); }
       }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
@@ -576,13 +623,14 @@
     for (const b of bullets) {
       ctx.fillStyle = b.cs;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.size, 0, TAU); ctx.fill();
+      if (b.fl & 4) { ctx.beginPath(); ctx.arc(b.x, b.y, b.size * 0.45, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill(); }
       if ((b.fl & 2) && Math.random() < 0.4) addParticle(b.x, b.y, 0, 0, 0.7, 0.06, 2, '#ff9030', 1);
     }
   }
 
   function drawZone(scene) {
     const z = scene.hud && scene.hud.z;
-    if (!z) return;
+    if (!z) { scene.zoneNow = null; return; }
     const tick = scene.tick || 0;
     const k = z[7] > z[6] ? Math.max(0, Math.min(1, (tick - z[6]) / (z[7] - z[6]))) : (tick >= z[7] ? 1 : 0);
     const x = z[0] + (z[3] - z[0]) * k, y = z[1] + (z[4] - z[1]) * k, r = z[2] + (z[5] - z[2]) * k;
@@ -637,181 +685,226 @@
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+    const inv = 1 / Math.max(0.6, cam.scale);
     for (let i = floats.length - 1; i >= 0; i--) {
       const f = floats[i];
       f.life -= 0.012 * k; f.y -= 0.6 * k;
       if (f.life <= 0) { floats.splice(i, 1); continue; }
       ctx.globalAlpha = Math.min(1, f.life * 2);
-      ctx.font = `bold ${Math.round((f.big ? 20 : 15) / Math.max(0.6, cam.scale))}px system-ui, sans-serif`;
+      ctx.font = `700 ${Math.round((f.big ? 18 : 14) * inv)}px ${FONT}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(f.text, f.x, f.y);
+      ctx.lineWidth = 3 * inv; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineJoin = 'round'; ctx.strokeText(f.text, f.x, f.y);
       ctx.fillStyle = f.col; ctx.fillText(f.text, f.x, f.y);
     }
     ctx.globalAlpha = 1;
   }
 
   // ---------- HUD ----------
-  function text(t, x, y, size, col, align, stroke) {
-    ctx.font = `800 ${size}px system-ui, "Segoe UI", sans-serif`;
-    ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle';
-    if (stroke !== false) { ctx.lineWidth = Math.max(3, size / 6); ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineJoin = 'round'; ctx.strokeText(t, x, y); }
-    ctx.fillStyle = col || '#fff';
+  function font(size, weight) { ctx.font = `${weight || 500} ${size}px ${FONT}`; }
+  function label(t, x, y, size, col, align, weight) {
+    font(size, weight);
+    ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = col || '#e7eaf1';
     ctx.fillText(t, x, y);
   }
-  const fmtTime = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
-
-  function pill(x, y, w, h, c, a) {
-    ctx.beginPath(); roundRectPath(x, y, w, h, h / 2);
-    ctx.fillStyle = c ? rgba(c, a == null ? 0.25 : a) : 'rgba(0,0,0,0.5)'; ctx.fill();
+  // Крупный текст поверх игры — с мягкой тенью
+  function shout(t, x, y, size, col) {
+    font(size, 700);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.75)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+    ctx.fillStyle = col || '#fff';
+    ctx.fillText(t, x, y);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   }
+  function panel(x, y, w, h, r) {
+    ctx.beginPath(); roundRectPath(x, y, w, h, r == null ? 10 : r);
+    ctx.fillStyle = 'rgba(12,14,20,0.72)'; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.stroke();
+  }
+  function textW(t, size, weight) { font(size, weight); return ctx.measureText(t).width; }
+  const fmtTime = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  function hpColor(k) { return k > 0.6 ? '#45d483' : k > 0.3 ? '#ffc24b' : '#ff5d5d'; }
 
   function drawHud(scene, now, fps) {
     const hud = scene.hud || {};
     const me = scene.me;
-    const small = cw < 700;
+    const small = cw < 720 || ch < 500;
     const touch = TG.Input.isTouch;
-    const topY = 24 + (touch ? 34 : 0);
-    let title = hud.t || scene.info.title || '';
+    const top = 12;
+
+    // ---- центр: название режима и главное состояние ----
+    const title = hud.t || scene.info.title || '';
     const parts = [];
     if (hud.bots != null && (scene.info.mode === 'levels' || scene.info.mode === 'waves')) parts.push('Врагов: ' + hud.bots);
     if (hud.time != null) parts.push(fmtTime(hud.time));
     if (hud.kills != null) parts.push('Уничтожено: ' + hud.kills);
     if (hud.target != null && !hud.score) parts.push('до ' + hud.target + ' убийств');
-    if (hud.alive != null && hud.total != null) parts.push(`Живых: ${hud.alive}/${hud.total}`);
-    text(title + (parts.length ? '  ·  ' + parts.join('  ·  ') : ''), cw / 2, topY, small ? 14 : 19, '#e8ecff');
-
-    let rowY = topY + 30;
+    if (hud.alive != null && hud.total != null) parts.push(`Живых: ${hud.alive} из ${hud.total}`);
+    const line2 = parts.join('  ·  ');
+    const ts = small ? 11.5 : 12.5, ms = small ? 14 : 16;
+    let cy = top;
+    {
+      const w = Math.max(textW(title.toUpperCase(), ts, 600) + 12, line2 ? textW(line2, ms, 600) : 0) + 28;
+      const h = line2 ? 50 : 30;
+      panel(cw / 2 - w / 2, cy, w, h);
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '1px';
+      label(title.toUpperCase(), cw / 2, cy + 15, ts, '#8a91a5', 'center', 600);
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
+      if (line2) label(line2, cw / 2, cy + 34, ms, '#e7eaf1', 'center', 600);
+      cy += h + 8;
+    }
     if (hud.score) {
-      text(String(hud.score[0]), cw / 2 - 40, rowY, 30, cstr(TG.TEAM_COLORS[1]));
-      text(':', cw / 2, rowY, 26, '#fff');
-      text(String(hud.score[1]), cw / 2 + 40, rowY, 30, cstr(TG.TEAM_COLORS[2]));
-      let sub = hud.caps ? 'до ' + hud.caps + ' захватов' : hud.target ? 'до ' + hud.target + ' убийств' : '';
+      const w = 170, h = hud.left != null || hud.caps || hud.target ? 52 : 38;
+      panel(cw / 2 - w / 2, cy, w, h);
+      label(String(hud.score[0]), cw / 2 - 26, cy + 19, 24, cstr(TG.TEAM_COLORS[1]), 'right', 700);
+      label(':', cw / 2, cy + 18, 20, '#5c6377', 'center', 700);
+      label(String(hud.score[1]), cw / 2 + 26, cy + 19, 24, cstr(TG.TEAM_COLORS[2]), 'left', 700);
+      let sub = hud.caps ? 'до ' + hud.caps + ' захватов' : hud.target ? 'до ' + hud.target : '';
       if (hud.left != null) sub += (sub ? '  ·  ' : '') + fmtTime(hud.left);
-      if (sub) text(sub, cw / 2, rowY + 24, 13, '#9aa3c8');
+      if (sub) label(sub, cw / 2, cy + 40, 12, '#8a91a5', 'center');
+      cy += h + 8;
     }
     if (hud.cores) {
-      // Бедварс: ядра команд
-      const n = hud.cores.length, pw = small ? 92 : 118, gap = 8;
+      const n = hud.cores.length, pw = small ? 86 : 104, gap = 6, h = 30;
       let x = cw / 2 - (n * pw + (n - 1) * gap) / 2;
       for (let i = 0; i < n; i++) {
         const team = i + 1, c = TG.TEAM_COLORS[team];
         const alive = hud.cores[i] >= 0;
-        pill(x, rowY - 13, pw, 26, c, scene.meTeam === team ? 0.45 : 0.22);
-        if (scene.meTeam === team) { ctx.lineWidth = 2; ctx.strokeStyle = cstr(c); ctx.stroke(); }
-        text(alive ? `⬢ ${hud.cores[i]}` : '✖', x + (small ? 30 : 38), rowY, small ? 12 : 14, alive ? cstr(c) : '#ff6b6b');
-        text(`👤${hud.alive[i]}`, x + pw - (small ? 22 : 28), rowY, small ? 11 : 13, '#fff');
+        panel(x, cy, pw, h, 8);
+        ctx.fillStyle = cstr(c); ctx.fillRect(x + 1, cy + 5, 3, h - 10);
+        if (alive) {
+          const k = hud.cores[i] / (hud.coreMax || 36);
+          ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x + 12, cy + h - 8, pw - 44, 3);
+          ctx.fillStyle = cstr(c); ctx.fillRect(x + 12, cy + h - 8, (pw - 44) * k, 3);
+          label('Ядро ' + hud.cores[i], x + 12, cy + 11, 12, '#e7eaf1', 'left', 600);
+        } else label('разрушено', x + 12, cy + 15, 11, '#ff5d5d', 'left', 500);
+        label(String(hud.alive[i]), x + pw - 12, cy + 15, 13, scene.meTeam === team ? cstr(c) : '#e7eaf1', 'right', 600);
+        if (scene.meTeam === team) { ctx.beginPath(); roundRectPath(x, cy, pw, h, 8); ctx.strokeStyle = rgba(c, 0.7); ctx.lineWidth = 1.5; ctx.stroke(); }
         x += pw + gap;
       }
-      if (hud.left != null) text(fmtTime(hud.left), cw / 2, rowY + 24, 13, '#9aa3c8');
+      if (hud.left != null) label(fmtTime(hud.left), cw / 2, cy + h + 12, 12, '#8a91a5', 'center', 500);
+      cy += h + 22;
     }
     if (hud.z) {
       const zt = hud.zt;
-      text(zt < 0 ? 'ЗОНА СУЖАЕТСЯ!' : zt > 0 ? `Зона сузится через ${fmtTime(zt)}` : '', cw / 2, rowY, small ? 13 : 15, zt < 0 ? '#ff5ad2' : '#e7b6ff');
+      const t = zt < 0 ? 'Зона сужается' : zt > 0 ? `Зона сузится через ${fmtTime(zt)}` : '';
+      if (t) { const w = textW(t, 13, 600) + 24; panel(cw / 2 - w / 2, cy, w, 26, 8); label(t, cw / 2, cy + 13, 13, zt < 0 ? '#ff7ad9' : '#d9c2ff', 'center', 600); cy += 34; }
       if (me && me.alive && scene.zoneNow && Math.hypot(me.x - scene.zoneNow.x, me.y - scene.zoneNow.y) > scene.zoneNow.r) {
-        if (Math.floor(now / 300) % 2 === 0) text('ВЫ ВНЕ ЗОНЫ! ВЕРНИТЕСЬ!', cw / 2, ch * 0.22, small ? 20 : 28, '#ff4bd0');
+        if (Math.floor(now / 350) % 2 === 0) shout('Вы вне зоны — вернитесь', cw / 2, ch * 0.24, small ? 18 : 24, '#ff7ad9');
       }
     }
-    if (hud.lead && hud.lead[1] > 0) text(`Лидер: ${hud.lead[0]} (${hud.lead[1]})`, cw / 2, rowY - 2, 14, '#ffd23f');
-    if (hud.surv != null) text(`ПРОДЕРЖИТЕСЬ: ${hud.surv.toFixed(1)} c`, cw / 2, rowY, small ? 18 : 22, '#00c8ff');
-    if (hud.next != null) text(`Следующая волна через ${hud.next}…`, cw / 2, ch / 2 - 80, small ? 20 : 26, '#00ff7a');
+    if (hud.lead && hud.lead[1] > 0) { const t = `Лидер: ${hud.lead[0]} — ${hud.lead[1]}`; const w = textW(t, 13, 500) + 24; panel(cw / 2 - w / 2, cy, w, 26, 8); label(t, cw / 2, cy + 13, 13, '#ffc24b', 'center', 500); cy += 34; }
+    if (hud.surv != null) shout(`Продержитесь: ${hud.surv.toFixed(1)} с`, cw / 2, cy + 14, small ? 16 : 20, '#5ec8f2');
+    if (hud.next != null) shout(`Следующая волна через ${hud.next}`, cw / 2, ch / 2 - 80, small ? 20 : 26, '#45d483');
     if (hud.tip && !scene.over) {
-      ctx.font = `600 ${small ? 13 : 15}px system-ui, sans-serif`;
-      const tw = Math.min(cw - 30, ctx.measureText(hud.tip).width + 30);
-      const ty = ch - (touch ? 190 : 60);
-      pill(cw / 2 - tw / 2, ty - 16, tw, 32, [0, 0, 0], 0.55);
-      text('💡 ' + hud.tip, cw / 2, ty, small ? 13 : 15, '#ffe9a8', 'center', false);
+      const t = hud.tip, s = small ? 13 : 14;
+      const w = Math.min(cw - 30, textW(t, s, 500) + 32);
+      const ty = ch - (touch ? 190 : 64);
+      panel(cw / 2 - w / 2, ty - 17, w, 34, 10);
+      label(t, cw / 2, ty, s, '#f3e6c0', 'center', 500);
     }
 
-    // Здоровье, бусты, уровень, ресурсы
-    const L = 16 + (touch ? 110 : 0);
-    let y = topY;
+    // ---- слева сверху: здоровье, усиления, ресурсы ----
+    const L = 12 + (touch ? 112 : 0);
+    const y = top;
     if (me) {
-      if (me.maxHp <= 12) {
-        for (let i = 0; i < me.maxHp; i++) {
-          const x = L + i * 22;
-          ctx.beginPath(); ctx.arc(x + 8, y, 8, 0, TAU);
-          ctx.fillStyle = i < me.hp ? '#ff3b5c' : 'rgba(255,255,255,0.12)'; ctx.fill();
-          ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke();
-        }
-        if (me.f & F.extra) { ctx.beginPath(); ctx.arc(L + me.maxHp * 22 + 8, y, 6, 0, TAU); ctx.fillStyle = '#ff8fa0'; ctx.fill(); ctx.stroke(); }
-      }
-      y += 24;
-      let bx = L;
-      const act = [[F.speed, 'speed'], [F.shield, 'shield'], [F.rapid, 'rapid'], [F.big, 'big'], [F.triple, 'triple'], [F.homing, 'homing'], [F.damage, 'damage'], [F.invis, 'invis']];
-      for (const [bit, type] of act) {
-        if (!(me.f & bit)) continue;
-        const info = TG.BOOST_INFO[type];
-        ctx.beginPath(); roundRectPath(bx, y - 10, 20, 20, 4);
-        ctx.fillStyle = cstr(info.c); ctx.fill();
-        drawBoostIcon(type, bx + 10, y, 15);
-        bx += 24;
-      }
-      if (me.f & F.stun) { text('ОГЛУШЕНИЕ', bx + 4, y, 12, '#8fd0ff', 'left'); bx += 80; }
-      if (bx > L) y += 26;
       const pers = scene.pers;
+      const pw = small ? 190 : 220;
+      let ph = 36;
+      const act = [[F.speed, 'speed'], [F.shield, 'shield'], [F.rapid, 'rapid'], [F.big, 'big'], [F.triple, 'triple'], [F.homing, 'homing'], [F.damage, 'damage']];
+      const chips = act.filter(([bit]) => me.f & bit);
+      if (chips.length || (me.f & F.stun)) ph += 26;
+      if (pers && pers.lvl != null) ph += 28;
+      if (pers && pers.coins != null) ph += 28;
+      panel(L, y, pw, ph);
+      const segs = Math.max(1, Math.min(me.maxHp, 12));
+      const bx = L + 12, bw = pw - 64, gap = 3, sw = (bw - gap * (segs - 1)) / segs;
+      const k = me.hp / Math.max(1, me.maxHp);
+      for (let i = 0; i < segs; i++) {
+        ctx.fillStyle = i < me.hp ? hpColor(k) : 'rgba(255,255,255,0.1)';
+        ctx.fillRect(bx + i * (sw + gap), y + 13, sw, 10);
+      }
+      label(`${me.hp}/${me.maxHp}`, L + pw - 12, y + 18, 13, '#e7eaf1', 'right', 600);
+      if (me.f & F.extra) { ctx.beginPath(); ctx.arc(L + pw - 48, y + 18, 3.5, 0, TAU); ctx.fillStyle = '#ff8fa0'; ctx.fill(); }
+      let ry = y + 36;
+      if (chips.length || (me.f & F.stun)) {
+        let cx = L + 12;
+        for (const [, type] of chips) {
+          const info = TG.BOOST_INFO[type];
+          ctx.beginPath(); roundRectPath(cx, ry, 20, 20, 5);
+          ctx.fillStyle = cstr(info.c); ctx.fill();
+          drawBoostIcon(type, cx + 10, ry + 10, 14);
+          cx += 24;
+        }
+        if (me.f & F.stun) label('Оглушение', cx + 2, ry + 10, 12, '#8fd0ff', 'left', 600);
+        ry += 26;
+      }
       if (pers && pers.lvl != null) {
-        text('УРОВЕНЬ ' + pers.lvl, L, y, 15, '#ffd23f', 'left');
-        const w = 150;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(L, y + 12, w, 8);
-        ctx.fillStyle = '#ffd23f'; ctx.fillRect(L, y + 12, w * Math.min(1, pers.xp / pers.next), 8);
-        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.strokeRect(L, y + 12, w, 8);
+        label('Уровень ' + pers.lvl, L + 12, ry + 8, 13, '#ffc24b', 'left', 600);
+        const w = pw - 24;
+        ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(L + 12, ry + 18, w, 4);
+        ctx.fillStyle = '#ffc24b'; ctx.fillRect(L + 12, ry + 18, w * Math.min(1, pers.xp / pers.next), 4);
+        ry += 28;
       }
       if (pers && pers.coins != null) {
-        pill(L - 4, y - 13, touch ? 150 : 250, 26, [0, 0, 0], 0.5);
-        drawGem(L + 8, y, 7, TG.ITEMS.crystal.c);
-        text(String(pers.coins), L + 20, y, 15, '#9fe6ff', 'left');
-        ctx.fillStyle = '#6a7bd8'; ctx.fillRect(L + 62, y - 7, 14, 14);
-        text('×' + pers.blocks, L + 80, y, 14, '#fff', 'left');
-        if (!touch) text('B — магазин · E — блок', L + 118, y, 12, '#9aa3c8', 'left');
+        drawGem(L + 18, ry + 10, 6, TG.ITEMS.crystal.c);
+        label(String(pers.coins), L + 29, ry + 10, 14, '#9fe3ff', 'left', 600);
+        let x = L + 29 + textW(String(pers.coins), 14, 600) + 16;
+        const nb = pers.blocks + (pers.hblocks || 0);
+        ctx.fillStyle = '#6a7bd8'; ctx.fillRect(x, ry + 4, 12, 12);
+        label(String(nb), x + 17, ry + 10, 13, '#e7eaf1', 'left', 500);
+        x += 17 + textW(String(nb), 13, 500) + 14;
+        ctx.beginPath(); ctx.arc(x + 6, ry + 10, 6, 0, TAU); ctx.fillStyle = pers.bombs ? '#ff9a3c' : '#3a3f50'; ctx.fill();
+        label(String(pers.bombs || 0), x + 16, ry + 10, 13, '#e7eaf1', 'left', 500);
+        ry += 28;
       }
+      if (pers && pers.coins != null && !touch) label('B — магазин  ·  E — блок  ·  R — бомба', L + 2, y + ph + 12, 11.5, '#6f7690', 'left', 500);
       if (!me.alive && !scene.over) {
-        const sub = scene.respawnIn != null ? `Возрождение через ${scene.respawnIn}…` : pers && pers.out ? 'Ядро разрушено — вы выбыли' : (scene.spectating ? 'Наблюдение: ' + scene.spectating : '');
-        text('ВЫ ПОГИБЛИ', cw / 2, ch / 2 - 30, small ? 28 : 40, '#ff4b5c');
-        if (sub) text(sub, cw / 2, ch / 2 + 12, small ? 16 : 20, '#e8ecff');
+        const sub = scene.respawnIn != null ? `Возрождение через ${scene.respawnIn} с` : pers && pers.out ? 'Ядро разрушено — вы выбыли' : (scene.spectating ? 'Наблюдение: ' + scene.spectating : '');
+        shout('Вы погибли', cw / 2, ch / 2 - 26, small ? 26 : 34, '#ff5d5d');
+        if (sub) shout(sub, cw / 2, ch / 2 + 12, small ? 15 : 17, '#e7eaf1');
       }
     } else if (scene.spectating && !scene.over) {
-      text('Наблюдение: ' + scene.spectating, cw / 2, ch - 40, 16, '#9aa3c8');
-      text('Вы появитесь в следующем раунде', cw / 2, ch - 18, 13, '#9aa3c8');
+      const t = 'Наблюдение: ' + scene.spectating + ' · вы появитесь в следующем раунде';
+      const w = textW(t, 13, 500) + 24;
+      panel(cw / 2 - w / 2, ch - 50, w, 30, 8);
+      label(t, cw / 2, ch - 35, 13, '#a9b0c3', 'center', 500);
     }
 
-    // Лента убийств
-    let fy = topY + (small ? 40 : 0) + (touch ? 44 : 0);
+    // ---- справа сверху: лента убийств ----
+    let fy = top + (touch && scene.info.big && R.settings.minimap ? Math.min(118, ch * 0.26) + 16 : 0);
     for (let i = feed.length - 1; i >= 0; i--) if (now - feed[i].t > 6000) feed.splice(i, 1);
-    const feedRight = touch && scene.info.big ? cw - 130 : cw - 14;
+    const feedRight = cw - 12;
     for (const e of feed) {
       const age = now - e.t;
       ctx.globalAlpha = age > 5000 ? Math.max(0, 1 - (age - 5000) / 1000) : 1;
-      ctx.font = '700 13px system-ui, sans-serif';
-      const vW = ctx.measureText(e.v).width;
-      const mid = e.s ? '  ⨯  ' : '☠ ';
-      const mW = ctx.measureText(mid).width;
-      const sW = e.s ? ctx.measureText(e.s).width : 0;
+      const mid = e.s ? '  ›  ' : '✕  ';
+      const vW = textW(e.v, 12.5, 500), mW = textW(mid, 12.5, 500), sW = e.s ? textW(e.s, 12.5, 600) : 0;
       const total = sW + mW + vW;
-      let x = feedRight - total;
-      ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x - 8, fy - 11, total + 16, 22);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      if (e.s) { ctx.fillStyle = e.sc; ctx.fillText(e.s, x, fy); x += sW; }
-      ctx.fillStyle = '#ccc'; ctx.fillText(mid, x, fy); x += mW;
-      ctx.fillStyle = e.vc; ctx.fillText(e.v, x, fy);
-      fy += 26;
+      let x = feedRight - total - 10;
+      panel(x - 10, fy, total + 20, 24, 7);
+      if (e.s) { label(e.s, x, fy + 12, 12.5, e.sc, 'left', 600); x += sW; }
+      label(mid, x, fy + 12, 12.5, '#6f7690', 'left', 500); x += mW;
+      label(e.v, x, fy + 12, 12.5, e.vc, 'left', 500);
+      fy += 28;
     }
     ctx.globalAlpha = 1;
 
-    // Большие сообщения
+    // ---- сообщения по центру ----
     let my = ch * 0.3;
     for (let i = msgs.length - 1; i >= 0; i--) if (now - msgs[i].t > 3000) msgs.splice(i, 1);
     for (const m of msgs) {
       const age = now - m.t;
       ctx.globalAlpha = age > 2300 ? Math.max(0, 1 - (age - 2300) / 700) : Math.min(1, age / 150);
-      const sc = m.big ? (small ? 24 : 38) : (small ? 14 : 19);
-      text(m.text, cw / 2, my, sc, m.col);
+      const sc = m.big ? (small ? 22 : 32) : (small ? 14 : 17);
+      shout(m.text, cw / 2, my, sc, m.col);
       my += sc + 12;
     }
     ctx.globalAlpha = 1;
 
     if (R.settings.showFps) {
       const pt = `${Math.round(fps)} FPS` + (scene.ping != null ? `  ·  ${scene.ping} мс` : '');
-      text(pt, cw - 12, ch - 14, 12, '#8a93b8', 'right');
+      label(pt, cw - 12, ch - 14, 12, '#6f7690', 'right', 500);
     }
   }
 
@@ -819,14 +912,15 @@
     const info = scene.info;
     if (!info.big || !R.settings.minimap) return;
     const touch = TG.Input.isTouch;
-    const maxW = touch ? 105 : cw < 700 ? 110 : 170, maxH = touch ? Math.min(125, ch * 0.28) : cw < 700 ? 150 : 200;
+    const maxW = touch ? 105 : cw < 720 ? 110 : 170, maxH = touch ? Math.min(118, ch * 0.26) : cw < 720 ? 150 : 200;
     const k = Math.min(maxW / info.w, maxH / info.h);
     const w = info.w * k, h = info.h * k;
-    const x0 = touch ? cw - w - 12 : 12, y0 = touch ? 62 : ch - h - 12;
-    ctx.fillStyle = 'rgba(8,10,20,0.88)'; ctx.fillRect(x0 - 2, y0 - 2, w + 4, h + 4);
-    ctx.strokeStyle = 'rgba(0,200,255,0.4)'; ctx.lineWidth = 1; ctx.strokeRect(x0 - 2, y0 - 2, w + 4, h + 4);
-    for (const b of info.bases || []) { ctx.fillStyle = rgba(TG.TEAM_COLORS[b.team], 0.25); ctx.fillRect(x0 + b.x * k, y0 + b.y * k, b.w * k, b.h * k); }
-    ctx.fillStyle = 'rgba(140,150,200,0.55)';
+    const x0 = touch ? cw - w - 14 : 14, y0 = touch ? 14 : ch - h - 14;
+    panel(x0 - 4, y0 - 4, w + 8, h + 8, 8);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip();
+    for (const b of info.bases || []) { ctx.fillStyle = rgba(TG.TEAM_COLORS[b.team], 0.22); ctx.fillRect(x0 + b.x * k, y0 + b.y * k, b.w * k, b.h * k); }
+    ctx.fillStyle = 'rgba(140,150,200,0.5)';
     for (const o of info.obstacles) ctx.fillRect(x0 + o.x * k, y0 + o.y * k, Math.max(1, o.w * k), Math.max(1, o.h * k));
     for (const o of scene.dyn) {
       if (!o.core) continue;
@@ -834,18 +928,14 @@
       ctx.fillRect(x0 + o.x * k - 2, y0 + o.y * k - 2, o.w * k + 4, o.h * k + 4);
     }
     if (scene.zoneNow && scene.hud && scene.hud.z) {
-      ctx.save();
-      ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip();
       ctx.beginPath(); ctx.arc(x0 + scene.zoneNow.x * k, y0 + scene.zoneNow.y * k, scene.zoneNow.r * k, 0, TAU);
       ctx.strokeStyle = '#ff5ad2'; ctx.lineWidth = 1.5; ctx.stroke();
       const z = scene.hud.z;
       ctx.beginPath(); ctx.arc(x0 + z[3] * k, y0 + z[4] * k, Math.max(1, z[5] * k), 0, TAU);
       ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.restore();
     }
     for (const t of scene.tanks) {
       if (!(t.f & F.alive)) continue;
-      if ((t.f & F.invis) && !t.me && (scene.meTeam === 0 || t.team !== scene.meTeam)) continue;
       ctx.fillStyle = t.me ? '#fff' : cstr(tankColor(scene, t));
       const s = t.me ? 3.5 : 2.5;
       ctx.beginPath(); ctx.arc(x0 + t.x * k, y0 + t.y * k, s, 0, TAU); ctx.fill();
@@ -857,31 +947,32 @@
       ctx.fillRect(fx - 1, fy - 7, 1.5, 8);
     }
     const vw = cw / cam.scale, vh = ch / cam.scale;
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1;
     ctx.strokeRect(x0 + (cam.x - vw / 2) * k, y0 + (cam.y - vh / 2) * k, vw * k, vh * k);
+    ctx.restore();
   }
 
   function drawTouch() {
     const I = TG.Input;
     if (!I.isTouch) return;
     const R0 = I.cfg.stick;
-    const draw = (st, dx, dy, label) => {
+    const draw = (st, dx, dy, name) => {
       let ox, oy, x, y;
-      if (st.id !== -1) { ox = st.ox; oy = st.oy; x = st.x; y = st.y; }
-      else { ox = dx; oy = dy; x = ox; y = oy; }
-      ctx.globalAlpha = st.id !== -1 ? 0.5 : 0.18;
+      const active = st.id !== -1;
+      if (active) { ox = st.ox; oy = st.oy; x = st.x; y = st.y; } else { ox = dx; oy = dy; x = ox; y = oy; }
+      ctx.globalAlpha = active ? 0.55 : 0.2;
       ctx.beginPath(); ctx.arc(ox, oy, R0, 0, TAU);
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff'; ctx.stroke();
       const vx = x - ox, vy = y - oy, d = Math.hypot(vx, vy), m = Math.min(d, R0);
       const kx = d > 0 ? ox + vx / d * m : ox, ky = d > 0 ? oy + vy / d * m : oy;
-      ctx.beginPath(); ctx.arc(kx, ky, R0 * 0.38, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
-      if (st.id === -1) text(label, ox, oy + R0 + 16, 12, '#fff');
+      ctx.beginPath(); ctx.arc(kx, ky, R0 * 0.36, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
+      if (!active) label(name, ox, oy + R0 + 14, 11, '#fff', 'center', 500);
       ctx.globalAlpha = 1;
     };
-    const lx = 40 + R0, rx = cw - 40 - R0, yy = ch - 40 - R0;
+    const lx = 36 + R0, rx = cw - 36 - R0, yy = ch - 36 - R0;
     draw(I.move, I.cfg.leftHanded ? rx : lx, yy, 'движение');
-    draw(I.aim, I.cfg.leftHanded ? lx : rx, yy, I.cfg.autoFire ? 'прицел / огонь' : 'прицел');
+    draw(I.aim, I.cfg.leftHanded ? lx : rx, yy, I.cfg.autoFire ? 'прицел и огонь' : 'прицел');
   }
 
   // ---------- Главный кадр ----------
@@ -889,7 +980,7 @@
     const now = performance.now();
     const high = R.settings.quality !== 'low';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#07080f';
+    ctx.fillStyle = '#07080d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (!scene) return;
     updateCamera(scene, dt);
@@ -899,25 +990,25 @@
     const vw = cw / cam.scale, vh = ch / cam.scale;
     const x0 = cam.x - vw / 2 - 60, y0 = cam.y - vh / 2 - 60, x1 = cam.x + vw / 2 + 60, y1 = cam.y + vh / 2 + 60;
 
-    ctx.fillStyle = '#141522';
+    ctx.fillStyle = '#12131d';
     ctx.fillRect(0, 0, info.w, info.h);
     for (const b of info.bases || []) {
       const c = TG.TEAM_COLORS[b.team];
       if (b.round) {
         const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
         ctx.beginPath(); ctx.arc(cx, cy, b.w / 2, 0, TAU);
-        ctx.fillStyle = rgba(c, 0.08); ctx.fill();
-        ctx.setLineDash([12, 10]); ctx.strokeStyle = rgba(c, 0.5); ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = rgba(c, 0.07); ctx.fill();
+        ctx.setLineDash([12, 10]); ctx.strokeStyle = rgba(c, 0.45); ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
         continue;
       }
-      ctx.fillStyle = rgba(c, 0.1); ctx.fillRect(b.x, b.y, b.w, b.h);
-      ctx.strokeStyle = rgba(c, 0.5); ctx.lineWidth = 4; ctx.strokeRect(b.x + 2, b.y + 2, b.w - 4, b.h - 4);
-      ctx.globalAlpha = 0.25;
-      text('БАЗА ' + TG.TEAM_GEN[b.team].toUpperCase(), b.x + b.w / 2, b.y + b.h / 2, 48, cstr(c), 'center', false);
+      ctx.fillStyle = rgba(c, 0.08); ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = rgba(c, 0.45); ctx.lineWidth = 4; ctx.strokeRect(b.x + 2, b.y + 2, b.w - 4, b.h - 4);
+      ctx.globalAlpha = 0.18;
+      label('БАЗА ' + TG.TEAM_GEN[b.team].toUpperCase(), b.x + b.w / 2, b.y + b.h / 2, 46, cstr(c), 'center', 700);
       ctx.globalAlpha = 1;
     }
     drawGrid(info.w, info.h, x0, y0, x1, y1);
-    ctx.strokeStyle = 'rgba(0,200,255,0.55)'; ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(94,200,242,0.45)'; ctx.lineWidth = 3;
     ctx.strokeRect(-1.5, -1.5, info.w + 3, info.h + 3);
     drawPads(scene, now, high);
     drawObstacles(info.obstacles, x0, y0, x1, y1);

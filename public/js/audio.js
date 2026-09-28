@@ -4,7 +4,7 @@
   'use strict';
   const A = TG.Audio = {
     ctx: null, master: null, sfx: null, mus: null, noise: null,
-    volume: 0.7, sfxVol: 0.8, musicVol: 0.4, vibrate: true,
+    volume: 0.7, sfxVol: 0.8, musicVol: 0, vibrate: true,
     lx: 0, ly: 0, hasListener: false, mute: false,
     last: {}, recent: 0, recentT: 0, unlocked: false
   };

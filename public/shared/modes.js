@@ -679,8 +679,9 @@
   }
 
   // ======================================================================
-  // БЕДВАРС: ядра команд, разрушаемые блоки, ресурсы, магазин, турели
+  // БЕДВАРС: ядра команд, разрушаемые блоки, генераторы, магазин, бомбы, турели
   // ======================================================================
+  const shopIdx = (key) => TG.SHOP.findIndex((s) => s.key === key);
   class BedwarsMode extends BaseMode {
     constructor(w, o) {
       super(w, o);
@@ -694,44 +695,54 @@
       this.boostInterval = 480;
       this.maxBoosts = 5;
       this.cores = {};
+      this.ring = {};
       this.turrets = {};
+      this.forge = {};
       this.alertT = {};
     }
     title() { return 'Бедварс'; }
     setup() {
       const w = this.w, T = this.nTeams;
-      const W = T === 2 ? 2240 : 2000, H = T === 2 ? 1280 : 2000;
+      const W = T === 2 ? 2400 : 2200, H = T === 2 ? 1360 : 2200;
       const bases = T === 2
-        ? [{ x: 280, y: 640 }, { x: W - 280, y: 640 }]
+        ? [{ x: 280, y: 680 }, { x: W - 280, y: 680 }]
         : [{ x: 280, y: 280 }, { x: W - 280, y: 280 }, { x: W - 280, y: H - 280 }, { x: 280, y: H - 280 }];
       this.baseC = {};
-      const avoid = [];
-      bases.forEach((b, i) => { this.baseC[i + 1] = b; avoid.push({ x: b.x - 230, y: b.y - 230, w: 460, h: 460 }); });
-      avoid.push({ x: W / 2 - 130, y: H / 2 - 130, w: 260, h: 260 });
       w.map = { w: W, h: H, bases: [], obstacles: [], pads: [] };
-      const gen = T === 2
-        ? TG.genSymmetric(W, H, { count: U.randInt(4, 6), minW: 50, maxW: 150, minH: 40, maxH: 100, gap: 60, margin: 60 })
-        : TG.genSymmetric(W, H, { count: U.randInt(4, 6), minW: 50, maxW: 150, minH: 40, maxH: 100, gap: 60, margin: 60 });
+      const avoid = [];
+      const gemPads = T === 2
+        ? [{ x: W / 2, y: H / 2 }, { x: W / 2, y: 200 }, { x: W / 2, y: H - 200 }]
+        : [{ x: W / 2, y: H / 2 }, { x: W / 2, y: 260 }, { x: W / 2, y: H - 260 }, { x: 260, y: H / 2 }, { x: W - 260, y: H / 2 }];
+      bases.forEach((b, i) => {
+        const team = i + 1;
+        this.baseC[team] = b;
+        avoid.push({ x: b.x - 250, y: b.y - 250, w: 500, h: 500 });
+        const dx = W / 2 - b.x, dy = H / 2 - b.y, dl = Math.hypot(dx, dy);
+        // генератор кристаллов вынесен за пределы базы — его приходится защищать
+        const gx = Math.round(b.x + dx / dl * 340 - dy / dl * 70), gy = Math.round(b.y + dy / dl * 340 + dx / dl * 70);
+        w.map.pads.push({ x: gx, y: gy, team, gen: 'crystal', t: 0 });
+        avoid.push({ x: gx - 80, y: gy - 80, w: 160, h: 160 });
+      });
+      gemPads.forEach((g, i) => { w.map.pads.push({ x: g.x, y: g.y, team: 0, gen: 'gem', t: i * 90, main: i === 0 }); avoid.push({ x: g.x - 110, y: g.y - 110, w: 220, h: 220 }); });
+      const gen = TG.genSymmetric(W, H, { count: U.randInt(5, 7), minW: 50, maxW: 150, minH: 40, maxH: 100, gap: 60, margin: 60 });
       w.map.obstacles = gen.filter((o) => !avoid.some((a) => TG.rectsGap(o, a, 0)));
-      // базы: ядро + кольцо блоков + генератор кристаллов
+      // базы: ядро + кольцо блоков
       for (let team = 1; team <= T; team++) {
         const b = this.baseC[team];
-        w.map.bases.push({ x: b.x - 200, y: b.y - 200, w: 400, h: 400, team, round: 1 });
+        w.map.bases.push({ x: b.x - 230, y: b.y - 230, w: 460, h: 460, team, round: 1 });
         this.cores[team] = w.addDyn({ x: b.x - 28, y: b.y - 28, w: 56, h: 56, hp: 36, maxHp: 36, team, core: 1 });
+        this.ring[team] = [];
         for (let gx = b.x - 80; gx < b.x + 80; gx += 40) {
           for (let gy = b.y - 80; gy < b.y + 80; gy += 40) {
             if (gx >= b.x - 40 && gx < b.x + 40 && gy >= b.y - 40 && gy < b.y + 40) continue;
+            this.ring[team].push({ x: gx, y: gy, w: 40, h: 40 });
             w.addDyn({ x: gx, y: gy, w: 40, h: 40, hp: 4, maxHp: 4, team });
           }
         }
-        const dx = W / 2 - b.x, dy = H / 2 - b.y, dl = Math.hypot(dx, dy);
-        const pad = { x: Math.round(b.x + dx / dl * 125), y: Math.round(b.y + dy / dl * 125), team, gen: 'crystal', t: 0 };
-        w.map.pads.push(pad);
         this.turrets[team] = 0;
+        this.forge[team] = 0;
       }
-      w.map.pads.push({ x: W / 2, y: H / 2, team: 0, gen: 'gem', t: 0 });
       this.boostRegion = { x: W / 2 - 500, y: H / 2 - 400, w: 1000, h: 800 };
-      // команды
       const cnt = {};
       for (let i = 1; i <= T; i++) cnt[i] = 0;
       for (const p of w.players.values()) if (p.team >= 1 && p.team <= T) cnt[p.team]++;
@@ -743,29 +754,44 @@
         }
       }
       this.ts = Math.max(this.size, ...Object.values(cnt));
-      for (const p of w.players.values()) { const t = w.spawnPlayer(p, this.spawnPos(p.team), { hp: 3, maxHp: 3, shield: 120 }); t.blocks = 4; }
+      for (const p of w.players.values()) this.spawnHuman(p);
       for (let team = 1; team <= T; team++) {
         for (let i = cnt[team]; i < this.ts; i++) this.addBot(team, i);
       }
       this.startTick = w.tick;
     }
+    spawnHuman(p) {
+      const t = this.w.spawnPlayer(p, this.spawnPos(p.team), { hp: 3, maxHp: 3, shield: 120 });
+      t.blocks = 4;
+      return t;
+    }
     addBot(team, i) {
       const t = this.w.createTacticalBot(this.spawnPos(team), team, this.diff, 3, 'Бот ' + BOT_NAMES[(i + team * 5) % BOT_NAMES.length]);
       t.blocks = 4;
-      const mates = this.w.tanks.filter((o) => o.isBot && o.team === team && !o.kd).length;
-      t.role = mates === 2 && this.ts >= 2 ? 'def' : 'atk';
+      const mates = this.w.tanks.filter((o) => o.team === team && !o.kd && o !== t).length;
+      t.role = mates === 1 && this.ts >= 2 ? 'def' : 'atk';
       return t;
     }
     spawnPos(team) {
       const b = this.baseC[team];
       const W = this.w.map.w, H = this.w.map.h;
       const dx = W / 2 - b.x, dy = H / 2 - b.y, dl = Math.hypot(dx, dy);
-      const cx = b.x + dx / dl * 225, cy = b.y + dy / dl * 225;
-      return TG.findSpot(this.w.map, { r: 24, region: { x: cx - 90, y: cy - 90, w: 180, h: 180 }, avoidTanks: this.w.tanks });
+      const cx = b.x + dx / dl * 160, cy = b.y + dy / dl * 160;
+      return TG.findSpot(this.w.map, { r: 24, region: { x: cx - 80, y: cy - 80, w: 160, h: 160 }, avoidTanks: this.w.tanks });
     }
     canPlace(rect) {
-      for (const p of this.w.map.pads) if (TG.circleRect(p.x, p.y, 34, rect)) return false;
+      for (const p of this.w.map.pads) if (TG.circleRect(p.x, p.y, 38, rect)) return false;
       return true;
+    }
+    missingRing(team) {
+      const out = [];
+      if (!this.cores[team]) return out;
+      for (const c of this.ring[team]) {
+        let has = false;
+        for (const o of this.w.dyn) if (o.x === c.x && o.y === c.y && !o.core) { has = true; break; }
+        if (!has) out.push(c);
+      }
+      return out;
     }
     onJoin(p) {
       const w = this.w, T = this.nTeams;
@@ -779,49 +805,66 @@
       }
       const bot = w.tanks.find((t) => t.isBot && !t.kd && t.team === p.team);
       if (bot) w.removeTank(bot);
-      if (this.cores[p.team]) { const t = w.spawnPlayer(p, this.spawnPos(p.team), { hp: 3, maxHp: 3, shield: 120 }); t.blocks = 4; }
+      if (this.cores[p.team]) this.spawnHuman(p);
     }
     onLeave(p) {
       if (!this.w.over && this.cores[p.team]) this.addBot(p.team, U.randInt(0, 20));
     }
     buy(t, idx) {
       const item = TG.SHOP[idx];
-      if (!item) return;
-      const bw = t.bw;
-      const fail = (why) => { if (t.pid) this.w.emit({ k: 'shop', tid: t.id, ok: 0, why }); };
+      if (!item) return false;
+      const bw = t.bw, w = this.w;
+      const fail = (why) => { if (t.pid) w.emit({ k: 'shop', tid: t.id, ok: 0, why }); return false; };
       if (t.coins < item.price) return fail('Не хватает кристаллов');
-      if (item.max && (bw[item.key] || 0) >= item.max) return fail('Максимальный уровень');
+      const lvl = item.team ? this.forge[t.team] : (bw[item.key] || 0);
+      if (item.max && lvl >= item.max) return fail('Максимальный уровень');
       const core = this.cores[t.team];
       switch (item.key) {
         case 'blocks': t.blocks += 4; break;
+        case 'hblocks': t.hblocks += 2; break;
+        case 'bomb': if (t.bombs >= 3) return fail('Не больше 3 бомб'); t.bombs++; break;
+        case 'walls': {
+          if (!core) return fail('Ядро разрушено');
+          let fixed = 0;
+          for (const c of this.missingRing(t.team)) {
+            if (!w.canPlaceRect(c, t)) continue;
+            w.addDyn({ x: c.x, y: c.y, w: 40, h: 40, hp: 4, maxHp: 4, team: t.team });
+            fixed++;
+          }
+          if (!fixed && core.hp >= core.maxHp) return fail('Защита и так цела');
+          core.hp = Math.min(core.maxHp, core.hp + 10); w.dynChanged(core, false);
+          break;
+        }
         case 'armor': t.maxHp++; t.hp++; break;
         case 'dmg': t.dmgBonus++; break;
         case 'rate': t.reloadMult *= 0.85; break;
         case 'speed': t.baseSpeed = +(t.baseSpeed * 1.12).toFixed(3); break;
-        case 'repair':
-          if (!core || core.hp >= core.maxHp) return fail(core ? 'Ядро цело' : 'Ядро разрушено');
-          core.hp = Math.min(core.maxHp, core.hp + 15); this.w.dynChanged(core, false); break;
+        case 'heal': if (t.hp >= t.maxHp) return fail('HP и так полное'); t.hp = Math.min(t.maxHp, t.hp + 2); break;
+        case 'shield': t.shieldUntil = Math.max(t.shieldUntil, w.tick + 360); break;
         case 'turret': {
           if (this.turrets[t.team] >= 2) return fail('Максимум 2 турели');
-          const pos = TG.findSpot(this.w.map, { r: 24, region: { x: t.x - 90, y: t.y - 90, w: 180, h: 180 }, avoidTanks: this.w.tanks });
-          const tur = this.w.createBot('turret', pos, t.team, { cd: 30 });
+          const pos = TG.findSpot(w.map, { r: 24, region: { x: t.x - 90, y: t.y - 90, w: 180, h: 180 }, avoidTanks: w.tanks });
+          const tur = w.createBot('turret', pos, t.team, { cd: 30 });
           tur.name = 'Турель';
           this.turrets[t.team]++;
           break;
         }
-        case 'shield': t.shieldUntil = Math.max(t.shieldUntil, this.w.tick + 360); break;
+        case 'forge':
+          this.forge[t.team]++;
+          w.emit({ k: 'msg', text: `Кузница: генератор ускорен (ур. ${this.forge[t.team]})`, c: TG.TEAM_COLORS[t.team], team: t.team });
+          break;
       }
-      bw[item.key] = (bw[item.key] || 0) + 1;
+      if (!item.team) bw[item.key] = (bw[item.key] || 0) + 1;
       t.coins -= item.price;
-      this.w.emit({ k: 'shop', tid: t.id, ok: 1, item: item.name });
+      w.emit({ k: 'shop', tid: t.id, ok: 1, item: item.name });
+      return true;
     }
     tick() {
       const w = this.w, tick = w.tick;
       if (tick - this.startTick >= this.limit) { this.timeUp(); return; }
-      // генераторы ресурсов
       for (const p of w.map.pads) {
-        const every = p.gen === 'gem' ? 420 : 55;
-        const cap = p.gen === 'gem' ? 3 : 10;
+        const every = p.gen === 'gem' ? (p.main ? 420 : 600) : Math.round(55 / (1 + 0.5 * (this.forge[p.team] || 0)));
+        const cap = p.gen === 'gem' ? 3 : 12;
         if (++p.t < every) continue;
         p.t = 0;
         if (p.team && !this.cores[p.team] && !w.tanks.some((t) => t.alive && t.team === p.team)) continue;
@@ -829,7 +872,6 @@
         for (const b of w.boosts) if (b.type === p.gen && U.dist2(b.x, b.y, p.x, p.y) < 50 * 50) near++;
         if (near < cap) w.addBoost(p.x + U.rand(-20, 20), p.y + U.rand(-20, 20), p.gen);
       }
-      // возрождение, пока ядро цело
       for (const t of w.tanks) {
         if (t.alive || (t.kd && t.kd.turret) || !t.respawnAt) continue;
         if (!this.cores[t.team]) continue;
@@ -844,7 +886,6 @@
     postTick() {
       const w = this.w;
       if (w.over) return;
-      // удаляем уничтоженные турели
       for (let i = w.tanks.length - 1; i >= 0; i--) {
         const t = w.tanks[i];
         if (!t.alive && t.kd && t.kd.turret) { this.turrets[t.team] = Math.max(0, this.turrets[t.team] - 1); w.tanks.splice(i, 1); w.tankMap.delete(t.id); }
@@ -893,34 +934,58 @@
     }
     botBuy(t) {
       const core = this.cores[t.team];
-      const order = t.role === 'def'
-        ? (core && core.hp < core.maxHp * 0.7 ? ['repair', 'armor', 'rate', 'blocks'] : ['armor', 'rate', 'turret', 'dmg', 'blocks'])
-        : ['armor', 'dmg', 'rate', 'speed', 'shield'];
+      const missing = this.missingRing(t.team).length;
+      const order = [];
+      if (t.role === 'def' && core) {
+        if (core.hp < core.maxHp * 0.6 || missing >= 3) order.push('walls');
+        if (t.hp < t.maxHp - 1) order.push('heal');
+        if (t.blocks + t.hblocks < 3) order.push('hblocks');
+        order.push('armor', 'rate', 'turret', 'forge', 'dmg');
+      } else {
+        if (t.hp < t.maxHp - 1) order.push('heal');
+        order.push('armor');
+        if (t.bombs < 1 && (t.bw.armor || 0) >= 1) order.push('bomb');
+        order.push('dmg', 'rate', 'speed');
+        if (t.blocks + t.hblocks < 2) order.push('blocks');
+      }
       for (const key of order) {
-        const idx = TG.SHOP.findIndex((s) => s.key === key);
-        const item = TG.SHOP[idx];
+        const item = TG.SHOP[shopIdx(key)];
         if (t.coins < item.price) continue;
-        if (item.max && (t.bw[key] || 0) >= item.max) continue;
+        const lvl = item.team ? this.forge[t.team] : (t.bw[key] || 0);
+        if (item.max && lvl >= item.max) continue;
         if (key === 'turret' && this.turrets[t.team] >= 2) continue;
-        if (key === 'blocks' && t.blocks >= 4) continue;
-        this.buy(t, idx);
-        return;
+        if (this.buy(t, shopIdx(key))) return;
       }
     }
     botThink(t) {
-      const w = this.w, ai = t.ai;
+      const w = this.w, ai = t.ai, tick = w.tick;
       if (t.kd && t.kd.turret) { TG.AI.brain(w, t, { noChase: true }); return; }
-      if ((w.tick + t.id) % 90 === 0) this.botBuy(t);
+      if ((tick + t.id) % 90 === 0) this.botBuy(t);
       const base = this.baseC[t.team];
       const pad = w.map.pads.find((p) => p.team === t.team);
+      const vis = TG.AI.perceive(w, t);
+      // укрытие из блока, когда бот ранен под огнём
+      if ((t.blocks + t.hblocks) > 0 && t.hp <= Math.max(1, t.maxHp / 3) && vis.length && vis[0].d < 420 && tick > (ai.coverBlockT || 0)) {
+        const en = vis[0].t;
+        if (w.placeBlock(t, Math.atan2(en.y - t.y, en.x - t.x))) ai.coverBlockT = tick + 240;
+      }
       let orders;
       if (t.role === 'def' && this.cores[t.team]) {
-        // защитник: держится у базы, собирает кристаллы у своего генератора
-        const cr = w.boosts.find((b) => b.type === 'crystal' && U.dist2(b.x, b.y, pad.x, pad.y) < 60 * 60);
-        orders = { goal: cr ? { x: cr.x, y: cr.y, stop: 2 } : { x: pad.x, y: pad.y, stop: 40 }, hold: 320 };
+        const missing = (t.blocks + t.hblocks) > 0 ? this.missingRing(t.team) : [];
+        if (missing.length) {
+          // защитник чинит кольцо вокруг ядра
+          let best = null, bd = Infinity;
+          for (const c of missing) { const d = U.dist2(c.x + 20, c.y + 20, t.x, t.y); if (d < bd) { bd = d; best = c; } }
+          const cx = best.x + 20, cy = best.y + 20;
+          const ox = cx - base.x, oy = cy - base.y, ol = Math.hypot(ox, oy) || 1;
+          orders = { goal: { x: cx + ox / ol * 55, y: cy + oy / ol * 55, stop: 12 }, urgent: !vis.length };
+          if (bd < 85 * 85 && w.canPlaceRect(best, t)) w.placeBlockAt(t, best);
+        } else {
+          const cr = w.boosts.find((b) => b.type === 'crystal' && U.dist2(b.x, b.y, pad.x, pad.y) < 60 * 60);
+          orders = { goal: cr ? { x: cr.x, y: cr.y, stop: 2 } : { x: (pad.x + base.x) / 2, y: (pad.y + base.y) / 2, stop: 40 }, hold: 380 };
+        }
       } else {
-        // атакующий: ближайшее живое вражеское ядро (или выжившие враги)
-        if (!ai.enemy || !this.teamAlive(ai.enemy) || w.tick > (ai.enemyT || 0)) {
+        if (!ai.enemy || !this.teamAlive(ai.enemy) || tick > (ai.enemyT || 0)) {
           let best = null, bd = Infinity;
           for (let team = 1; team <= this.nTeams; team++) {
             if (team === t.team || !this.teamAlive(team)) continue;
@@ -928,13 +993,25 @@
             const d = Math.hypot(b.x - t.x, b.y - t.y) + (this.cores[team] ? 0 : 400);
             if (d < bd) { bd = d; best = team; }
           }
-          ai.enemy = best; ai.enemyT = w.tick + 900;
+          ai.enemy = best; ai.enemyT = tick + 900;
         }
         const et = ai.enemy;
-        if (et && this.cores[et]) {
+        if (ai.retreatUntil > tick && ai.retreatTo) {
+          orders = { goal: ai.retreatTo, urgent: true };
+        } else if (et && this.cores[et]) {
           const core = this.cores[et];
-          orders = { goal: { x: core.x + core.w / 2, y: core.y + core.h / 2, stop: 120 }, structure: { x: core.x + core.w / 2, y: core.y + core.h / 2, obs: core } };
-          // по дороге подбираем алмазы в центре
+          const cx = core.x + core.w / 2, cy = core.y + core.h / 2;
+          const dc = Math.hypot(cx - t.x, cy - t.y);
+          orders = { goal: { x: cx, y: cy, stop: 110 }, structure: { x: cx, y: cy, obs: core } };
+          // бомба у вражеского кольца — и отход
+          if (t.bombs > 0 && dc < 175 && tick > (ai.bombT || 0)) {
+            t.a = Math.atan2(cy - t.y, cx - t.x);
+            if (w.placeBomb(t)) {
+              ai.bombT = tick + 300;
+              ai.retreatUntil = tick + 130;
+              ai.retreatTo = { x: U.clamp(t.x - (cx - t.x) / dc * 220, 40, w.map.w - 40), y: U.clamp(t.y - (cy - t.y) / dc * 220, 40, w.map.h - 40), stop: 20 };
+            }
+          }
           const gem = w.boosts.find((b) => b.type === 'gem' && U.dist2(b.x, b.y, t.x, t.y) < 260 * 260);
           if (gem) orders.goal = { x: gem.x, y: gem.y, stop: 2 };
         } else if (et) {
@@ -958,7 +1035,7 @@
     personal(p) {
       const t = p.tank;
       if (!t) return null;
-      const res = { coins: t.coins, blocks: t.blocks, bw: t.bw, shop: 1 };
+      const res = { coins: t.coins, blocks: t.blocks, hblocks: t.hblocks, bombs: t.bombs, bw: t.bw, forge: this.forge[t.team] || 0, shop: 1 };
       if (!t.alive) {
         if (this.cores[t.team] && t.respawnAt) res.resp = Math.max(0, Math.ceil((t.respawnAt - this.w.tick) / 60));
         else res.out = 1;

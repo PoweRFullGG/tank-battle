@@ -6,7 +6,7 @@
   const $ = UI.$;
 
   const Game = TG.Game = {
-    session: null, demo: null, room: null, myPid: 0, roomPlayers: new Map(),
+    session: null, demo: null, room: null, myPid: 0, roomPlayers: new Map(), avatars: new Map(),
     liveAim: null, lastScene: null, paused: false, chatOpen: false, showBoard: false, resultOpen: false, pending: null
   };
 
@@ -29,7 +29,6 @@
     for (const t of sc.tanks) {
       if (t.me || !(t.f & F.alive)) continue;
       if (sc.meTeam && sc.meTeam !== 0 && t.team === sc.meTeam) continue;
-      if (t.f & F.invis) continue;
       const dx = t.x - sc.me.x, dy = t.y - sc.me.y, d = Math.hypot(dx, dy);
       if (d > 750) continue;
       const diff = Math.abs(TG.U.angDiff(Math.atan2(dy, dx), a));
@@ -64,7 +63,7 @@
     $('hud-chat').hidden = false;
     updateTouchButtons();
     Game.updateMusic();
-    if (I.isTouch && UI.settings.autoFs) enterFullscreen(true);
+    if (I.isTouch && UI.settings.autoFs && (!navigator.userActivation || navigator.userActivation.isActive)) enterFullscreen(true);
   }
 
   Game.startSolo = function (mode, opts) {
@@ -122,7 +121,7 @@
   };
 
   // ---------- Главный цикл ----------
-  let last = performance.now(), fps = 60, sbTimer = 0, hintT = 0;
+  let last = performance.now(), fps = 60, sbTimer = 0;
   function frame(now) {
     requestAnimationFrame(frame);
     let dt = now - last;
@@ -151,11 +150,11 @@
           if (!sc.pers || !sc.pers.shop || !sc.me || !sc.me.alive) UI.showShop(false);
           else UI.renderShop(sc.pers, (i) => Game.act(16 + i));
         }
-        const bw = !!(sc.pers && sc.pers.shop) && I.isTouch;
+        const bw = !!(sc.pers && sc.pers.shop) && I.isTouch && !!sc.me && sc.me.alive;
         $('tb-block').hidden = !bw; $('tb-shop').hidden = !bw;
+        $('tb-bomb').hidden = !(bw && sc.pers.bombs > 0);
       } else R.draw(null, dt, fps);
       if (Game.showBoard && (sbTimer -= dt) <= 0) { sbTimer = 400; renderBoard(); }
-      if ((hintT -= dt) <= 0) { hintT = 500; $('rotate-hint').hidden = !(I.isTouch && window.innerHeight > window.innerWidth * 1.1); }
     } else if (Game.demo) {
       Game.demo.update(dt);
       R.draw(Game.demo.scene(), dt, fps);
@@ -181,7 +180,7 @@
     $('pause-title').textContent = s.isNet ? 'Меню' : 'Пауза';
     $('pause-restart').hidden = s.isNet;
     $('pause-lobby').hidden = !(s.isNet && Game.room && Game.room.host === Game.myPid);
-    $('pause-exit').textContent = s.isNet ? '✕ Выйти из комнаты' : '✕ Выйти в меню';
+    $('pause-exit').textContent = s.isNet ? 'Выйти из комнаты' : 'Выйти в меню';
     $('pause-info').textContent = s.isNet ? `Комната ${Game.room ? Game.room.code : ''} · игра продолжается` : '';
     $('ov-pause').hidden = false;
   }
@@ -240,9 +239,9 @@
     $('btn-touch-menu').hidden = !show;
     $('btn-touch-score').hidden = !show;
     $('tb-fire').hidden = !(show && !I.cfg.autoFire);
-    if (!show) { $('tb-block').hidden = true; $('tb-shop').hidden = true; }
+    if (!show) { $('tb-block').hidden = true; $('tb-shop').hidden = true; $('tb-bomb').hidden = true; }
     document.body.classList.toggle('touch', I.isTouch);
-    $('main-foot').textContent = I.isTouch ? 'Левая половина экрана — движение, правая — прицел и огонь' : 'WASD — движение · Мышь — прицел · ЛКМ/Пробел — огонь';
+    $('main-foot').textContent = I.isTouch ? 'Левая половина экрана — движение, правая — прицел и огонь' : 'WASD — движение · мышь — прицел · ЛКМ — огонь';
   }
 
   function clearHash() { if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
@@ -277,7 +276,7 @@
       UI.toast('Игра открыта в другой вкладке — это окно отключено', 4000);
     });
     Net.on('joined', (m) => {
-      if (Game.myRoomCode !== m.code) { $('lobby-chat').innerHTML = ''; Game.room = null; }
+      if (Game.myRoomCode !== m.code) { $('lobby-chat').innerHTML = ''; Game.room = null; Game.avatars.clear(); }
       Game.myRoomCode = m.code;
       Game.myPid = m.pid;
       history.replaceState(null, '', location.pathname + location.search + '#' + m.code);
@@ -287,9 +286,19 @@
     Net.on('room', (m) => {
       Game.room = m;
       Game.roomPlayers.clear();
-      for (const p of m.members) Game.roomPlayers.set(p.pid, p);
+      for (const p of m.members) {
+        p.avatar = p.pid === Game.myPid ? (UI.settings.avatar || '') : (p.av ? Game.avatars.get(p.pid) || '' : '');
+        Game.roomPlayers.set(p.pid, p);
+      }
       if (UI.current === 'lobby') UI.renderLobby();
       if (m.state === 'lobby' && Game.session && Game.session.isNet) { Game.endSession(); UI.show('lobby'); UI.renderLobby(); }
+    });
+    Net.on('avatar', (m) => {
+      const a = typeof m.a === 'string' ? m.a : '';
+      Game.avatars.set(m.pid, a);
+      const p = Game.roomPlayers.get(m.pid);
+      if (p) p.avatar = a;
+      if (UI.current === 'lobby') UI.renderLobby();
     });
     Net.on('start', (m) => Game.startNet(m));
     Net.on('end', (m) => { if (Game.session && Game.session.isNet) Game.showResult(m.result, false); });
@@ -393,8 +402,20 @@
     $('set-quality').addEventListener('change', (e) => { S.quality = e.target.value; persist(); });
     const check = (id, key) => $(id).addEventListener('change', (e) => { S[key] = e.target.checked; persist(); });
     check('set-fps', 'showFps'); check('set-shake', 'shake'); check('set-names', 'names'); check('set-dmg', 'dmgNums');
-    check('set-minimap', 'minimap'); check('set-vibrate', 'vibrate'); check('set-autofire', 'autoFire'); check('set-lefty', 'lefty'); check('set-autofs', 'autoFs');
+    check('set-minimap', 'minimap'); check('set-ff', 'ffBullets'); check('set-vibrate', 'vibrate'); check('set-autofire', 'autoFire'); check('set-lefty', 'lefty'); check('set-autofs', 'autoFs');
     $('btn-fullscreen').onclick = toggleFullscreen;
+    $('set-avatar-btn').onclick = () => $('set-avatar-file').click();
+    $('set-avatar-file').addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      UI.loadAvatar(file).then((data) => {
+        S.avatar = data;
+        UI.saveSettings(); UI.applyProfile(); UI.renderSettings();
+        UI.toast('Аватар установлен — он будет на корпусе вашего танка');
+      }, (err) => UI.toast((err && err.message) || 'Не удалось загрузить изображение'));
+    });
+    $('set-avatar-clear').onclick = () => { S.avatar = ''; UI.saveSettings(); UI.applyProfile(); UI.renderSettings(); };
     $('btn-test-sound').onclick = () => { A.init(); A.play('pick'); A.buzz(60); Game.updateMusic(); };
 
     // админ
@@ -448,6 +469,7 @@
     holdButton($('tb-fire'), () => { I.fireBtn = true; }, () => { I.fireBtn = false; });
     holdButton($('tb-block'), () => { Game.act(4); A.buzz(15); });
     holdButton($('tb-shop'), toggleShop);
+    holdButton($('tb-bomb'), () => { Game.act(5); A.buzz(25); });
 
     // Горячие клавиши
     I.onKey = (e) => {
@@ -473,11 +495,14 @@
       if (Game.paused || UI.current || Game.resultOpen) return true;
       if (e.code === 'KeyB') { toggleShop(); return false; }
       if (e.code === 'KeyE' || e.code === 'KeyQ') { Game.act(4); return false; }
-      const m = /^(Digit|Numpad)([1-8])$/.exec(e.code);
+      if (e.code === 'KeyR') { Game.act(5); return false; }
+      if (UI.shopOpen && (e.code === 'Minus' || e.code === 'NumpadSubtract')) { Game.act(16 + 10); return false; }
+      if (UI.shopOpen && (e.code === 'Equal' || e.code === 'NumpadAdd')) { Game.act(16 + 11); return false; }
+      const m = /^(Digit|Numpad)([0-9])$/.exec(e.code);
       if (m) {
         const n = +m[2];
-        if (UI.shopOpen) Game.act(16 + n - 1);
-        else if (n <= 3) Game.act(n);
+        if (UI.shopOpen) Game.act(16 + (n === 0 ? 9 : n - 1));
+        else if (n >= 1 && n <= 3) Game.act(n);
         return false;
       }
       return true;

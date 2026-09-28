@@ -3,6 +3,8 @@
   'use strict';
   const C = TG.C, U = TG.U;
 
+  const HIST = 32; // длина истории позиций (тики)
+
   // Флаги танка в снапшоте
   const F = TG.TF = {
     alive: 1, shield: 2, iframe: 4, extra: 8, speed: 16, big: 32, rapid: 64, triple: 128,
@@ -45,7 +47,7 @@
       const p = {
         id: d.id, name: d.name || 'Игрок', color: d.color || [0, 255, 100], shape: d.shape || 'Circle',
         team: d.team || 0, tank: null, inputs: [], credits: 0, ackSeq: 0, connected: true,
-        pending: 0, upOpts: [], joinTick: this.tick, respawnAt: 0
+        pending: 0, upOpts: [], joinTick: this.tick, respawnAt: 0, rewind: 0
       };
       this.players.set(p.id, p);
       if (this.started) this.mode.onJoin(p);
@@ -110,7 +112,8 @@
         bulletSpeedMod: 1, sizeMult: 1, reloadMult: 1, dmgBonus: 0, multi: 0, regen: 0, regenT: 0,
         vx: 0, vy: 0, kills: 0, deaths: 0, score: 0, ai: {}, noBoosts: !!o.noBoosts,
         carrying: null, xp: 0, level: 1, coins: 0, blocks: 0, bw: {}, streak: 0, multiKill: 0, lastKill: -9999,
-        sk: o.sk || null, kd: o.kind ? TG.BOT_KINDS[o.kind] : null, shots: 0
+        sk: o.sk || null, kd: o.kind ? TG.BOT_KINDS[o.kind] : null, shots: 0, hblocks: 0, bombs: 0,
+        hs: this.tick, hx: new Float32Array(HIST), hy: new Float32Array(HIST)
       };
       if (!t.isBot && this.admin) {
         t.baseSpeed = t.speed = +this.admin.player_speed || 3;
@@ -167,6 +170,7 @@
       t.iframeUntil = 0; t.shieldUntil = shield ? this.tick + shield : 0;
       t.extraLife = false; t.cd = 20; t.vx = t.vy = 0; t.carrying = null; t.speed = t.baseSpeed;
       t.streak = 0;
+      t.hs = this.tick;
       if (t.isBot) { t.ai = {}; t.shots = 0; }
       TG.unstick(t, this.map);
     }
@@ -229,7 +233,8 @@
       if (this.nextBulletId > 65000) this.nextBulletId = 1;
       this.bullets.push({
         id, x: bx, y: by, vx: cos * spd, vy: sin * spd, size, owner: t.id, team: t.team,
-        big: size > 9, dmg, homing, life: C.BULLET_LIFE, seq: seq || 0, nc: !!(t.kd && t.kd.boss)
+        big: size > 9, dmg, homing, life: C.BULLET_LIFE, seq: seq || 0, nc: !!(t.kd && t.kd.boss),
+        rw: t.pid ? ((this.players.get(t.pid) || {}).rewind | 0) : 0
       });
       return true;
     }
@@ -241,6 +246,7 @@
       if (act >= 1 && act <= 3) this.chooseUpgrade(p, act - 1);
       if (!t || !t.alive || this.over || this.mode.frozen) return;
       if (act === 4) this.placeBlock(t);
+      else if (act === 5) this.placeBomb(t);
       else if (act >= 16 && act < 48 && this.mode.buy) this.mode.buy(t, act - 16);
       if (t.stunUntil > this.tick) return;
       t.a = inp.a;
@@ -356,26 +362,69 @@
       }
     }
 
-    placeBlock(t) {
-      if (!this.mode.allowBlocks || t.blocks <= 0) return false;
+    // Можно ли поставить блок в клетку rect
+    canPlaceRect(r, t) {
       const B = C.BLOCK;
-      let rect = null;
+      if (r.x < 0 || r.y < 0 || r.x + B > this.map.w || r.y + B > this.map.h) return false;
+      for (const o of this.map.obstacles) if (TG.rectsGap(r, o, -0.5)) return false;
+      for (const k of this.tanks) if (k.alive && TG.circleRect(k.x, k.y, k.r + 2, r)) return false;
+      for (const b of this.boosts) if (b.type === 'bomb' && TG.circleRect(b.x, b.y, 12, r)) return false;
+      if (this.mode.canPlace && !this.mode.canPlace(r, t)) return false;
+      return true;
+    }
+
+    // Поставить блок перед танком (сначала обычный, если их нет — бронеблок)
+    placeBlock(t, angle) {
+      if (!this.mode.allowBlocks || (t.blocks <= 0 && t.hblocks <= 0)) return false;
+      const B = C.BLOCK;
+      const a = angle == null ? t.a : angle;
       // пробуем клетки по направлению прицела: ближняя занята — ставим чуть дальше
       for (const dist of [t.r + 28, t.r + 44, t.r + 62]) {
-        const tx = t.x + Math.cos(t.a) * dist, ty = t.y + Math.sin(t.a) * dist;
+        const tx = t.x + Math.cos(a) * dist, ty = t.y + Math.sin(a) * dist;
         const r = { x: Math.floor(tx / B) * B, y: Math.floor(ty / B) * B, w: B, h: B };
-        if (r.x < 0 || r.y < 0 || r.x + B > this.map.w || r.y + B > this.map.h) continue;
-        let bad = false;
-        for (const o of this.map.obstacles) if (TG.rectsGap(r, o, -0.5)) { bad = true; break; }
-        if (!bad) for (const k of this.tanks) if (k.alive && TG.circleRect(k.x, k.y, k.r + 2, r)) { bad = true; break; }
-        if (!bad && this.mode.canPlace && !this.mode.canPlace(r, t)) bad = true;
-        if (!bad) { rect = r; break; }
+        if (this.canPlaceRect(r, t)) return this.placeBlockAt(t, r);
       }
-      if (!rect) return false;
-      t.blocks--;
-      this.addDyn({ x: rect.x, y: rect.y, w: B, h: B, hp: 4, maxHp: 4, team: t.team });
-      this.emit({ k: 'place', x: rect.x + B / 2, y: rect.y + B / 2, tid: t.id });
+      return false;
+    }
+
+    placeBlockAt(t, r) {
+      if (!this.mode.allowBlocks || !this.canPlaceRect(r, t)) return false;
+      let hp;
+      if (t.blocks > 0) { t.blocks--; hp = 4; } else if (t.hblocks > 0) { t.hblocks--; hp = 12; } else return false;
+      this.addDyn({ x: r.x, y: r.y, w: r.w, h: r.h, hp, maxHp: hp, team: t.team });
+      this.emit({ k: 'place', x: r.x + r.w / 2, y: r.y + r.h / 2, tid: t.id });
       return true;
+    }
+
+    // Бомба (Бедварс): взрывается через TG.BOMB_TIME тиков
+    placeBomb(t) {
+      if (!this.mode.allowBlocks || t.bombs <= 0) return false;
+      const x = U.clamp(t.x + Math.cos(t.a) * (t.r + 14), 12, this.map.w - 12);
+      const y = U.clamp(t.y + Math.sin(t.a) * (t.r + 14), 12, this.map.h - 12);
+      t.bombs--;
+      const b = this.addBoost(x, y, 'bomb');
+      b.team = t.team; b.owner = t.id; b.at = this.tick + TG.BOMB_TIME;
+      this.emit({ k: 'place', x, y, tid: t.id, bomb: 1 });
+      return true;
+    }
+
+    updateBombs() {
+      for (let i = this.boosts.length - 1; i >= 0; i--) {
+        const b = this.boosts[i];
+        if (b.type !== 'bomb' || this.tick < b.at) continue;
+        this.boosts.splice(i, 1);
+        const R = TG.BOMB_RADIUS, src = this.tankMap.get(b.owner) || { team: b.team };
+        for (const o of this.dyn.slice()) {
+          if (o.team === b.team) continue;
+          if (!TG.circleRect(b.x, b.y, R, o)) continue;
+          this.hitDyn(o, o.core ? 8 : 12, src);
+        }
+        for (const t of this.tanks) {
+          if (!t.alive || t.team === b.team || this.isInvincible(t)) continue;
+          if (U.dist2(t.x, t.y, b.x, b.y) < (R + t.r) * (R + t.r)) this.damage(t, src.id ? src : null, 2);
+        }
+        this.emit({ k: 'boom', x: b.x, y: b.y, c: [255, 170, 60], n: 80, big: 1, bomb: 1 });
+      }
     }
 
     dynList() {
@@ -483,7 +532,12 @@
         } else t.regenT = 0;
       }
 
+      // история позиций — для компенсации пинга (сервер «отматывает» цели на задержку стрелка)
+      const hi = tick % HIST;
+      for (const t of this.tanks) { t.hx[hi] = t.x; t.hy[hi] = t.y; }
+
       this.updateBullets();
+      if (this.mode.allowBlocks) this.updateBombs();
       this.pickBoosts();
 
       // Спавн бустов
@@ -569,7 +623,13 @@
           if (!t.alive || t.id === b.owner) continue;
           if (b.team !== 0 && b.team === t.team) continue;
           const rr = t.r + b.size;
-          const dx = b.x - t.x, dy = b.y - t.y;
+          let px = t.x, py = t.y;
+          if (b.rw) {
+            // позиция цели, какой её видел стрелок (с учётом его пинга и задержки интерполяции)
+            const pt = this.tick - b.rw;
+            if (pt >= t.hs && pt > this.tick - HIST) { px = t.hx[pt % HIST]; py = t.hy[pt % HIST]; }
+          }
+          const dx = b.x - px, dy = b.y - py;
           if (dx * dx + dy * dy >= rr * rr) continue;
           b.dead = true;
           if (!this.isInvincible(t)) this.damage(t, this.tankMap.get(b.owner) || null, b.dmg || 1);
@@ -588,6 +648,7 @@
         if (!t.alive) continue;
         for (let i = this.boosts.length - 1; i >= 0; i--) {
           const b = this.boosts[i];
+          if (b.type === 'bomb') continue;
           const item = TG.ITEMS[b.type];
           if (!item && t.noBoosts) continue;
           if (item && t.kd && t.kd.turret) continue;
@@ -669,7 +730,7 @@
       const boosts = [];
       for (const b of this.boosts) {
         const item = TG.ITEMS[b.type];
-        boosts.push({ id: b.id, x: b.x, y: b.y, type: item ? item.id : TG.BOOSTS.indexOf(b.type) });
+        boosts.push({ id: b.id, x: b.x, y: b.y, type: b.type === 'bomb' ? TG.BOMB_ID : item ? item.id : TG.BOOSTS.indexOf(b.type) });
       }
       return {
         tick, ack: p ? p.ackSeq : 0,
