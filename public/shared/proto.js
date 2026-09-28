@@ -64,12 +64,15 @@
       dv.setUint16(o + 4, qp(b.y), true);
       dv.setInt16(o + 6, qs(b.vx, 100), true);
       dv.setInt16(o + 8, qs(b.vy, 100), true);
-      dv.setUint8(o + 10, Math.min(255, Math.round(b.size * 8)));
+      dv.setUint8(o + 10, Math.min(255, Math.round(b.size * 4)));
       dv.setUint16(o + 11, b.owner, true);
+      dv.setUint8(o + 13, b.fl || 0);
       o += 15;
     }
-    dv.setUint8(o, snap.boosts.length); o += 1;
-    for (const b of snap.boosts) {
+    const nb = Math.min(255, snap.boosts.length);
+    dv.setUint8(o, nb); o += 1;
+    for (let i = 0; i < nb; i++) {
+      const b = snap.boosts[i];
       dv.setUint16(o, b.id, true);
       dv.setUint16(o + 2, b.x, true);
       dv.setUint16(o + 4, b.y, true);
@@ -120,7 +123,7 @@
       snap.bullets.push({
         id: d.getUint16(o, true), x: d.getUint16(o + 2, true) / PS, y: d.getUint16(o + 4, true) / PS,
         vx: d.getInt16(o + 6, true) / 100, vy: d.getInt16(o + 8, true) / 100,
-        size: d.getUint8(o + 10) / 8, owner: d.getUint16(o + 11, true)
+        size: d.getUint8(o + 10) / 4, owner: d.getUint16(o + 11, true), fl: d.getUint8(o + 13)
       });
       o += 15;
     }
@@ -170,7 +173,7 @@
       const up = d.getUint8(o + 9);
       res.push({
         seq: d.getUint32(o, true), mx: d.getInt8(o + 4) / 127, my: d.getInt8(o + 5) / 127,
-        a: d.getInt16(o + 6, true) / 10000, fire: (d.getUint8(o + 8) & 1) === 1, up: up <= 3 ? up : 0
+        a: d.getInt16(o + 6, true) / 10000, fire: (d.getUint8(o + 8) & 1) === 1, up: up < 48 ? up : 0
       });
       o += 10;
     }

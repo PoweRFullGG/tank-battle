@@ -1,4 +1,4 @@
-/* Ввод: клавиатура, мышь и сенсорные джойстики. */
+/* Ввод: клавиатура, мышь и сенсорные джойстики (плавающие, с настройкой размера и режимом для левши). */
 (function (TG) {
   'use strict';
   const I = TG.Input = {
@@ -7,12 +7,13 @@
     isTouch: false,
     move: { id: -1, ox: 0, oy: 0, x: 0, y: 0 },
     aim: { id: -1, ox: 0, oy: 0, x: 0, y: 0 },
+    fireBtn: false,
     lastAim: 0,
-    pendingUp: 0,
+    act: 0,
     enabled: false,
-    onKey: null
+    onKey: null,
+    cfg: { stick: 70, leftHanded: false, autoFire: true, aimAssist: 1 }
   };
-  const STICK_R = 60;
 
   function typing() {
     const a = document.activeElement;
@@ -26,20 +27,17 @@
       if (!I.enabled) return;
       I.keys.add(e.code);
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
-      if (e.code === 'Digit1' || e.code === 'Numpad1') I.pendingUp = 1;
-      if (e.code === 'Digit2' || e.code === 'Numpad2') I.pendingUp = 2;
-      if (e.code === 'Digit3' || e.code === 'Numpad3') I.pendingUp = 3;
     });
     window.addEventListener('keyup', (e) => { I.keys.delete(e.code); });
     window.addEventListener('blur', () => { I.keys.clear(); I.mouseDown = false; I.resetTouch(); });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) { I.keys.clear(); I.mouseDown = false; } });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { I.keys.clear(); I.mouseDown = false; I.resetTouch(); } });
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
-      TG.Audio.init();
       if (e.pointerType === 'touch') {
         I.isTouch = true;
-        const left = e.clientX < window.innerWidth / 2;
+        let left = e.clientX < window.innerWidth / 2;
+        if (I.cfg.leftHanded) left = !left;
         const st = left ? I.move : I.aim;
         if (st.id === -1) { st.id = e.pointerId; st.ox = st.x = e.clientX; st.oy = st.y = e.clientY; }
       } else {
@@ -52,12 +50,13 @@
     });
     canvas.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'touch') {
+        const R = I.cfg.stick;
         for (const st of [I.move, I.aim]) {
           if (st.id !== e.pointerId) continue;
           st.x = e.clientX; st.y = e.clientY;
           // «плавающий» джойстик: центр подтягивается за пальцем
           const dx = st.x - st.ox, dy = st.y - st.oy, d = Math.hypot(dx, dy);
-          if (d > STICK_R * 1.4) { st.ox = st.x - dx / d * STICK_R * 1.4; st.oy = st.y - dy / d * STICK_R * 1.4; }
+          if (d > R * 1.4) { st.ox = st.x - dx / d * R * 1.4; st.oy = st.y - dy / d * R * 1.4; }
         }
       } else {
         I.mx = e.clientX; I.my = e.clientY; I.mouseActive = true;
@@ -72,13 +71,11 @@
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
     window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch' && e.buttons === 0) I.mouseDown = false; });
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-      if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) I.isTouch = true;
-    }
+    if (('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.matchMedia && window.matchMedia('(pointer: coarse)').matches) I.isTouch = true;
   };
 
-  I.resetTouch = function () { I.move.id = -1; I.aim.id = -1; };
-  I.clear = function () { I.keys.clear(); I.mouseDown = false; I.resetTouch(); I.pendingUp = 0; };
+  I.resetTouch = function () { I.move.id = -1; I.aim.id = -1; I.fireBtn = false; };
+  I.clear = function () { I.keys.clear(); I.mouseDown = false; I.resetTouch(); I.act = 0; };
 
   I.moveVector = function () {
     let x = 0, y = 0;
@@ -89,14 +86,15 @@
     if (k.has('KeyD') || k.has('ArrowRight')) x += 1;
     if (x || y) { const l = Math.hypot(x, y); return [x / l, y / l]; }
     if (I.move.id !== -1) {
+      const R = I.cfg.stick;
       const dx = I.move.x - I.move.ox, dy = I.move.y - I.move.oy;
       const d = Math.hypot(dx, dy);
-      if (d > 8) { const m = Math.min(1, d / STICK_R); return [dx / d * m, dy / d * m]; }
+      if (d > 8) { const m = Math.min(1, d / R); return [dx / d * m, dy / d * m]; }
     }
     return [0, 0];
   };
 
-  // tx, ty — экранные координаты своего танка
+  // Сырой угол прицела. tx, ty — экранные координаты своего танка
   I.aimAngle = function (tx, ty) {
     if (I.aim.id !== -1) {
       const dx = I.aim.x - I.aim.ox, dy = I.aim.y - I.aim.oy;
@@ -111,13 +109,13 @@
     if (I.mouseActive && I.mx >= 0) I.lastAim = Math.atan2(I.my - ty, I.mx - tx);
     return I.lastAim;
   };
+  I.aimingByStick = () => I.aim.id !== -1 && Math.hypot(I.aim.x - I.aim.ox, I.aim.y - I.aim.oy) > 10;
 
   I.firing = function () {
-    if (I.keys.has('Space') || I.mouseDown) return true;
-    if (I.aim.id !== -1) return Math.hypot(I.aim.x - I.aim.ox, I.aim.y - I.aim.oy) > 18;
+    if (I.keys.has('Space') || I.mouseDown || I.fireBtn) return true;
+    if (I.aim.id !== -1 && I.cfg.autoFire) return Math.hypot(I.aim.x - I.aim.ox, I.aim.y - I.aim.oy) > 18;
     return false;
   };
 
-  I.takeUpgrade = function () { const u = I.pendingUp; I.pendingUp = 0; return u; };
-  I.STICK_R = STICK_R;
+  I.takeAction = function () { const a = I.act; I.act = 0; return a; };
 })(self.TG);

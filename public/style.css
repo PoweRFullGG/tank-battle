@@ -102,9 +102,10 @@ input[type=range] { padding: 0; accent-color: var(--neon); }
 .chat-form input { flex: 1; padding: 8px 10px; }
 
 /* Настройки */
-.settings-grid, .help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.help-grid { grid-template-columns: 1fr 1fr 1fr; }
-@media (max-width: 760px) { .settings-grid, .help-grid { grid-template-columns: 1fr; } }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.help-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .help-grid { grid-template-columns: 1fr; } }
+.menu-box.xwide { width: min(1180px, 100%); }
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
 .swatches button { width: 34px; height: 34px; border-radius: 9px; border: 2px solid #000; cursor: pointer; outline: 2px solid transparent; }
 .swatches button.sel { outline-color: #fff; box-shadow: 0 0 12px currentColor; }
@@ -150,3 +151,62 @@ table.sb td.n, table.sb th.n { text-align: right; font-variant-numeric: tabular-
   padding: 10px 18px; border-radius: 12px; font-weight: 600; max-width: 92vw; text-align: center; }
 @media (max-height: 520px) { #scr-main .tank-preview { display: none; } .menu-box { padding: 16px; } .btns { gap: 7px; } .btn.big { padding: 10px 14px; } }
 ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+
+/* ===== Версия 3: магазин, кнопки действий, звёзды, подсказки ===== */
+.mode-card .ic { font-size: 22px; float: right; margin-left: 6px; }
+.levels .btn { padding: 8px 0 14px; }
+.levels .btn .st { position: absolute; left: 0; right: 0; bottom: 1px; font-size: 9px; letter-spacing: 1px; color: #ffd23f; }
+.levels .btn.boss { color: #ffb37a; }
+.levels .btn.surv { color: #8fe3ff; }
+.level-info { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.04); font-size: 13px; line-height: 1.5; }
+.level-info .en { display: inline-flex; align-items: center; gap: 5px; margin-right: 10px; }
+.level-info .en i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid #000; display: inline-block; }
+.shop { position: fixed; right: 14px; top: 50%; transform: translateY(-50%); width: min(340px, 92vw); z-index: 14; background: rgba(12, 14, 28, 0.95);
+  border: 1px solid rgba(90, 220, 255, 0.45); border-radius: 14px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+.shop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.shop-head b { flex: 1; font-size: 17px; }
+#shop-coins { color: #9fe6ff; font-weight: 800; }
+.shop-items { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.shop-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer; text-align: left; color: var(--text); font: inherit; }
+.shop-item:hover { border-color: var(--neon); }
+.shop-item.na { opacity: 0.45; }
+.shop-item kbd { background: #2c3470; border-radius: 5px; padding: 1px 6px; font-size: 12px; font-weight: 800; }
+.shop-item .nm { flex: 1; }
+.shop-item .nm small { display: block; color: var(--muted); font-size: 11px; }
+.shop-item .pr { color: #9fe6ff; font-weight: 800; white-space: nowrap; }
+.act-btn { position: fixed; z-index: 12; width: 66px; height: 66px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35);
+  background: rgba(10,12,24,0.55); color: #fff; font-size: 26px; touch-action: none; }
+.act-btn:active { background: rgba(0,200,255,0.35); }
+.act-btn.fire { right: 24px; bottom: 170px; width: 78px; height: 78px; background: rgba(255,60,60,0.35); }
+.act-btn.block { right: 110px; bottom: 26px; width: 54px; height: 54px; font-size: 22px; }
+.act-btn.shopb { right: 172px; bottom: 26px; width: 54px; height: 54px; font-size: 22px; }
+body.lefty .act-btn.fire { right: auto; left: 24px; }
+body.lefty .act-btn.block { right: auto; left: 110px; }
+body.lefty .act-btn.shopb { right: auto; left: 172px; }
+.touch-btn.shop { left: 114px; }
+.rotate-hint { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 25; background: rgba(12,16,32,0.95); border: 1px solid var(--neon);
+  padding: 14px 18px; border-radius: 14px; font-weight: 700; text-align: center; width: min(320px, 86vw); pointer-events: none; }
+.upgrades .btn { min-height: 44px; }
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .seg .btn { min-height: 40px; }
+  .scoreboard { pointer-events: auto; }
+}
+.enemy-list i { width: 14px; height: 14px; }
+body.touch .shop { top: 58px; right: auto; left: 50%; transform: translateX(-50%); width: min(420px, 70vw); max-height: calc(100vh - 150px); display: flex; flex-direction: column; }
+body.touch .shop .shop-items { max-height: none; overflow-y: auto; flex: 1; }
+body.touch .shop-item { padding: 10px; }
+body.touch .shop-item small { display: none; }
+body.touch .shop-item { padding: 7px 10px; min-height: 40px; }
+.act-btn.block { right: 14px; bottom: auto; top: calc(50% - 10px); }
+.act-btn.shopb { right: 14px; bottom: auto; top: calc(50% - 76px); }
+body.lefty .act-btn.block, body.lefty .act-btn.shopb { right: auto; left: 14px; }
+.act-btn.block { top: calc(8px + env(safe-area-inset-top, 0px)); right: 128px; width: 50px; height: 50px; }
+.act-btn.shopb { top: calc(8px + env(safe-area-inset-top, 0px)); right: 186px; width: 50px; height: 50px; }
+body.lefty .act-btn.block { left: auto; right: 128px; }
+body.lefty .act-btn.shopb { left: auto; right: 186px; }
+.game-chat { left: 196px; bottom: 16px; }
+.game-chat-form { left: 196px; }
+body.touch .game-chat { left: 12px; bottom: auto; top: 118px; width: 42vw; font-size: 12px; }
+body.touch .game-chat-form { left: 50%; transform: translateX(-50%); bottom: auto; top: 70px; }

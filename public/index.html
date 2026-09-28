@@ -25,7 +25,7 @@
       <button class="btn" data-go="help">❔ Как играть</button>
       <button class="btn dim" data-go="admin">🔒 Админ-панель</button>
     </div>
-    <div class="foot">WASD — движение · Мышь — прицел · ЛКМ/Пробел — огонь</div>
+    <div class="foot" id="main-foot">WASD — движение · Мышь — прицел · ЛКМ/Пробел — огонь</div>
   </div>
 </section>
 
@@ -78,11 +78,7 @@
       <div class="panel">
         <h3>Игроки <span id="lobby-count"></span></h3>
         <div id="lobby-players" class="players"></div>
-        <div id="lobby-teams" class="row" hidden>
-          <button class="btn small team1" data-team="1">За синих</button>
-          <button class="btn small" data-team="0">Авто</button>
-          <button class="btn small team2" data-team="2">За красных</button>
-        </div>
+        <div id="lobby-teams" class="row" hidden></div>
       </div>
       <div class="panel">
         <h3>Режим</h3>
@@ -106,7 +102,7 @@
 
 <!-- ================= НАСТРОЙКИ ================= -->
 <section id="scr-settings" class="screen" hidden>
-  <div class="menu-box wide">
+  <div class="menu-box xwide">
     <h2>Настройки</h2>
     <div class="settings-grid">
       <div class="panel">
@@ -119,8 +115,15 @@
         <div id="set-shapes" class="shapes"></div>
       </div>
       <div class="panel">
-        <h3>Игра</h3>
-        <label class="field">Громкость звука <input type="range" id="set-volume" min="0" max="100"></label>
+        <h3>🔊 Звук</h3>
+        <label class="field">Общая громкость: <b id="set-volume-v"></b><input type="range" id="set-volume" min="0" max="100"></label>
+        <label class="field">Эффекты: <b id="set-sfx-v"></b><input type="range" id="set-sfx" min="0" max="100"></label>
+        <label class="field">Музыка: <b id="set-music-v"></b><input type="range" id="set-music" min="0" max="100"></label>
+        <label class="check"><input type="checkbox" id="set-vibrate"> Вибрация на телефоне</label>
+        <button class="btn small" id="btn-test-sound">🔈 Проверить звук</button>
+      </div>
+      <div class="panel">
+        <h3>🎨 Графика</h3>
         <label class="field">Качество графики
           <select id="set-quality">
             <option value="high">Высокое (неон, частицы)</option>
@@ -128,10 +131,24 @@
             <option value="low">Низкое (для слабых устройств)</option>
           </select>
         </label>
-        <label class="check"><input type="checkbox" id="set-fps"> Показывать FPS и пинг</label>
+        <label class="field">Количество частиц: <b id="set-particles-v"></b><input type="range" id="set-particles" min="25" max="100" step="5"></label>
+        <label class="field">Масштаб камеры на больших картах: <b id="set-zoom-v"></b><input type="range" id="set-zoom" min="70" max="140" step="5"></label>
         <label class="check"><input type="checkbox" id="set-shake"> Тряска экрана</label>
+        <label class="check"><input type="checkbox" id="set-dmg"> Цифры урона</label>
         <label class="check"><input type="checkbox" id="set-names"> Имена над танками</label>
-        <button class="btn" id="btn-fullscreen">⛶ Полный экран</button>
+        <label class="check"><input type="checkbox" id="set-minimap"> Миникарта</label>
+        <label class="check"><input type="checkbox" id="set-fps"> Показывать FPS и пинг</label>
+        <button class="btn small" id="btn-fullscreen">⛶ Полный экран</button>
+      </div>
+      <div class="panel">
+        <h3>📱 Управление на телефоне</h3>
+        <div class="muted">Размер джойстиков</div>
+        <div class="seg" id="set-stick"></div>
+        <div class="muted" style="margin-top:10px">Помощь в прицеливании</div>
+        <div class="seg" id="set-assist"></div>
+        <label class="check"><input type="checkbox" id="set-autofire"> Стрелять сразу при прицеливании (иначе — кнопка огня)</label>
+        <label class="check"><input type="checkbox" id="set-lefty"> Режим для левши (джойстики меняются местами)</label>
+        <label class="check"><input type="checkbox" id="set-autofs"> Полный экран при запуске игры</label>
       </div>
     </div>
     <div class="row"><button class="btn accent" data-go="back">✓ Готово</button></div>
@@ -145,17 +162,19 @@
     <div class="help-grid">
       <div class="panel">
         <h3>Управление</h3>
-        <p><b>WASD / стрелки</b> — движение<br><b>Мышь</b> — прицел<br><b>ЛКМ / Пробел</b> — огонь<br><b>Tab</b> — таблица счёта<br><b>Enter</b> — чат (с друзьями)<br><b>1 / 2 / 3</b> — выбор улучшения (Выживание)<br><b>Esc</b> — меню / пауза<br><b>F</b> — полный экран</p>
-        <p><b>Телефон:</b> левая половина экрана — движение, правая — прицел и стрельба.</p>
-      </div>
-      <div class="panel">
-        <h3>Бонусы</h3>
-        <div id="help-boosts" class="boost-list"></div>
-        <p class="muted">Пули отскакивают от стен. Большая пуля уничтожает маленькую.</p>
-      </div>
-      <div class="panel">
-        <h3>Режимы</h3>
+        <p><b>WASD / стрелки</b> — движение<br><b>Мышь</b> — прицел<br><b>ЛКМ / Пробел</b> — огонь<br><b>Tab</b> — таблица счёта<br><b>Enter</b> — чат (с друзьями)<br><b>1 / 2 / 3</b> — выбор улучшения (Выживание)<br><b>B</b> — магазин, <b>E</b> — поставить блок (Бедварс)<br><b>Esc</b> — меню / пауза<br><b>F</b> — полный экран</p>
+        <p><b>Телефон:</b> левая половина экрана — движение, правая — прицел и стрельба. Кнопки ☰ меню, 🏆 счёт, 🛒 магазин, ▣ блок — на экране.</p>
+        <h3 style="margin-top:14px">Режимы</h3>
         <div id="help-modes"></div>
+      </div>
+      <div class="panel">
+        <h3>Усиления</h3>
+        <div id="help-boosts" class="boost-list"></div>
+        <p class="muted">Пули отскакивают от стен. Большая пуля уничтожает маленькую. Пули боссов обычные пули не сбивают.</p>
+      </div>
+      <div class="panel">
+        <h3>Враги кампании</h3>
+        <div id="help-enemies" class="boost-list"></div>
       </div>
     </div>
     <div class="row"><button class="btn accent" data-go="main">← Назад</button></div>
@@ -188,8 +207,17 @@
 <div id="hud-chat" class="game-chat" hidden></div>
 <form id="game-chat-form" class="game-chat-form" hidden><input id="game-chat-input" maxlength="140" placeholder="Сообщение (Enter — отправить, Esc — отмена)" autocomplete="off"></form>
 <div id="scoreboard" class="scoreboard" hidden></div>
+<div id="shop" class="shop" hidden>
+  <div class="shop-head"><b>🛒 Магазин</b><span id="shop-coins"></span><button class="btn small" id="shop-close">✕</button></div>
+  <div id="shop-items" class="shop-items"></div>
+  <div class="muted small" id="shop-hint">Цифры 1–8 — быстро купить · B — закрыть</div>
+</div>
 <button id="btn-touch-menu" class="touch-btn" hidden>☰</button>
 <button id="btn-touch-score" class="touch-btn score" hidden>🏆</button>
+<button id="tb-fire" class="act-btn fire" hidden>🔥</button>
+<button id="tb-block" class="act-btn block" hidden>▣</button>
+<button id="tb-shop" class="act-btn shopb" hidden>🛒</button>
+<div id="rotate-hint" class="rotate-hint" hidden>🔄 Поверните телефон горизонтально — так играть удобнее</div>
 
 <section id="ov-pause" class="overlay" hidden>
   <div class="menu-box">
@@ -224,6 +252,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="shared/core.js"></script>
+<script src="shared/data.js"></script>
 <script src="shared/world.js"></script>
 <script src="shared/ai.js"></script>
 <script src="shared/modes.js"></script>

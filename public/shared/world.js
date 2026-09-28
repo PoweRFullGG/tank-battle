@@ -3,6 +3,12 @@
   'use strict';
   const C = TG.C, U = TG.U;
 
+  // Флаги танка в снапшоте
+  const F = TG.TF = {
+    alive: 1, shield: 2, iframe: 4, extra: 8, speed: 16, big: 32, rapid: 64, triple: 128,
+    homing: 256, flag: 512, damage: 1024, invis: 2048, stun: 4096
+  };
+
   class World {
     // opts: {mode, options, admin}
     constructor(opts) {
@@ -16,6 +22,10 @@
       this.boosts = [];
       this.players = new Map();
       this.map = { w: 800, h: 600, obstacles: [], bases: [] };
+      this.dyn = [];
+      this.dynRev = 0;
+      this.dynStructRev = 0;
+      this.nextDynId = 1;
       this.flags = [];
       this.events = [];
       this.nextId = 1;
@@ -90,15 +100,17 @@
     createTank(o) {
       const t = {
         id: this.newId(), pid: o.pid || 0, isBot: !o.pid, name: o.name || 'Бот',
-        x: o.x, y: o.y, a: o.a || 0, r: C.TANK_R, baseR: C.TANK_R,
-        baseSpeed: o.speed || 3, speed: o.speed || 3,
-        hp: o.hp || 1, maxHp: o.maxHp || o.hp || 1, team: o.team || 0, lvl: o.lvl || 0,
+        x: o.x, y: o.y, a: o.a || 0, r: o.r || C.TANK_R, baseR: o.r || C.TANK_R,
+        baseSpeed: o.speed == null ? 3 : o.speed, speed: o.speed == null ? 3 : o.speed,
+        hp: o.hp || 1, maxHp: o.maxHp || o.hp || 1, team: o.team || 0, kind: o.kind || 0,
         alive: true, respawnAt: 0, cd: o.cd == null ? 30 : o.cd, rate: o.rate || C.PLAYER_RATE,
-        extraLife: false, shieldUntil: 0, iframeUntil: 0, speedUntil: 0, bigUntil: 0,
-        gatlingUntil: 0, miniUntil: 0, fastUntil: 0,
-        bulletSpeedMod: o.bulletSpeedMod || 1, sizeMult: 1, reloadMult: 1,
+        bs: o.bs || C.BULLET_SPEED, bsize: o.bsize || 1,
+        extraLife: false, shieldUntil: 0, iframeUntil: 0, speedUntil: 0, bigUntil: 0, rapidUntil: 0,
+        tripleUntil: 0, homingUntil: 0, damageUntil: 0, invisUntil: 0, stunUntil: 0,
+        bulletSpeedMod: 1, sizeMult: 1, reloadMult: 1, dmgBonus: 0, multi: 0, regen: 0, regenT: 0,
         vx: 0, vy: 0, kills: 0, deaths: 0, score: 0, ai: {}, noBoosts: !!o.noBoosts,
-        carrying: null, xp: 0, level: 1
+        carrying: null, xp: 0, level: 1, coins: 0, blocks: 0, bw: {}, streak: 0, multiKill: 0, lastKill: -9999,
+        sk: o.sk || null, kd: o.kind ? TG.BOT_KINDS[o.kind] : null, shots: 0
       };
       if (!t.isBot && this.admin) {
         t.baseSpeed = t.speed = +this.admin.player_speed || 3;
@@ -107,6 +119,25 @@
       this.tanks.push(t);
       this.tankMap.set(t.id, t);
       return t;
+    }
+
+    // Бот определённого типа из кампании (kind — ключ или номер)
+    createBot(kind, pos, team, extra) {
+      const id = typeof kind === 'string' ? TG.KIND[kind] : kind;
+      const k = TG.BOT_KINDS[id];
+      extra = extra || {};
+      const hp = Math.max(1, Math.round(k.hp * (extra.hpMul || 1)));
+      return this.createTank({
+        x: pos.x, y: pos.y, team, kind: id, name: extra.name || k.name, speed: k.speed, hp, maxHp: hp, r: k.r,
+        rate: k.rate, bs: k.bs, bsize: k.bsize || 1, sk: k.sk, cd: extra.cd == null ? k.rate + 40 + U.randInt(0, 40) : extra.cd,
+        noBoosts: !!(k.god || k.turret)
+      });
+    }
+
+    // Бот для командных режимов с профилем сложности
+    createTacticalBot(pos, team, diff, hp, name) {
+      const D = TG.DIFF[diff] || TG.DIFF[2];
+      return this.createTank({ x: pos.x, y: pos.y, team, hp, maxHp: hp, rate: D.rate, sk: D.sk, cd: 60, name });
     }
 
     removeTank(t) {
@@ -119,22 +150,24 @@
     spawnPlayer(p, pos, o) {
       o = o || {};
       if (!p.tank) {
-        p.tank = this.createTank({ pid: p.id, name: p.name, x: pos.x, y: pos.y, hp: o.hp || 1, maxHp: o.maxHp || o.hp || 1, team: p.team, cd: 20 });
+        p.tank = this.createTank({ pid: p.id, name: p.name, x: pos.x, y: pos.y, hp: o.hp || 3, maxHp: o.maxHp || o.hp || 3, team: p.team, cd: 20 });
       } else {
         this.revive(p.tank, pos, o.shield || 0);
         if (o.hp) { p.tank.maxHp = Math.max(p.tank.maxHp, o.maxHp || o.hp); p.tank.hp = p.tank.maxHp; }
       }
       p.tank.team = p.team;
       if (o.shield) p.tank.shieldUntil = this.tick + o.shield;
+      TG.unstick(p.tank, this.map);
       return p.tank;
     }
 
     revive(t, pos, shield) {
       t.x = pos.x; t.y = pos.y; t.alive = true; t.hp = t.maxHp; t.r = t.baseR;
-      t.speedUntil = t.bigUntil = t.gatlingUntil = t.miniUntil = t.fastUntil = 0;
+      t.speedUntil = t.bigUntil = t.rapidUntil = t.tripleUntil = t.homingUntil = t.damageUntil = t.invisUntil = t.stunUntil = 0;
       t.iframeUntil = 0; t.shieldUntil = shield ? this.tick + shield : 0;
       t.extraLife = false; t.cd = 20; t.vx = t.vy = 0; t.carrying = null; t.speed = t.baseSpeed;
-      if (t.isBot) t.ai = {};
+      t.streak = 0;
+      if (t.isBot) { t.ai = {}; t.shots = 0; }
       TG.unstick(t, this.map);
     }
 
@@ -143,40 +176,60 @@
       return t.shieldUntil > this.tick || t.iframeUntil > this.tick;
     }
 
-    hostile(a, b) { // a,b — объекты с team и id/owner
-      return a.team === 0 || b.team === 0 ? true : a.team !== b.team;
-    }
+    isHostile(a, b) { return a !== b && (a.team === 0 || b.team === 0 || a.team !== b.team); }
 
     rateOf(t) {
       let r;
-      if (t.isBot) r = t.rate;
+      if (t.isBot) r = Math.max(3, Math.round(t.rate * t.reloadMult));
       else {
-        r = this.admin ? TG.msToTicks(+this.admin.fire_rate || 500) : C.PLAYER_RATE;
+        r = this.admin ? TG.msToTicks(+this.admin.fire_rate || 470) : C.PLAYER_RATE;
         r = Math.max(3, Math.round(r * t.reloadMult));
       }
-      if (t.gatlingUntil > this.tick) r = Math.min(r, C.GATLING_RATE);
+      if (t.rapidUntil > this.tick) r = Math.min(r, C.RAPID_RATE);
       return r;
     }
 
-    fire(t, seq) {
+    bulletSpeed(t) { return t.isBot ? t.bs * t.bulletSpeedMod : C.BULLET_SPEED * t.bulletSpeedMod; }
+
+    fire(t, seq, angleOverride) {
       if (this.bullets.length >= C.MAX_BULLETS) return false;
-      const rate = this.rateOf(t);
-      t.cd = rate;
-      const cos = Math.cos(t.a), sin = Math.sin(t.a);
+      t.cd = this.rateOf(t);
       const big = t.bigUntil > this.tick;
-      const size = C.BULLET_SIZE * t.sizeMult * (big ? 2 : 1);
-      let spd = t.lvl === 20 ? 12 : C.BULLET_SPEED * t.bulletSpeedMod;
-      if (t.fastUntil > this.tick) spd *= 3;
+      const size = C.BULLET_SIZE * t.sizeMult * t.bsize * (big ? 2 : 1);
+      const spd = this.bulletSpeed(t);
+      const dmg = (1 + (t.dmgBonus || 0)) * (t.damageUntil > this.tick ? 2 : 1);
+      const homing = t.homingUntil > this.tick;
+      const base = angleOverride == null ? t.a : angleOverride;
+      let n = 1, step = 0;
+      const extra = (t.multi || 0) + (t.tripleUntil > this.tick ? 1 : 0);
+      if (extra > 0) { n = Math.min(7, 1 + 2 * extra); step = 0.2; }
+      if (t.kd && t.kd.spread && t.kd.spread.n > n) { n = t.kd.spread.n; step = t.kd.spread.a; }
+      let ok = false;
+      for (let i = 0; i < n; i++) {
+        const a = base + (i - (n - 1) / 2) * step;
+        if (this.spawnBullet(t, a, spd, size, dmg, homing, seq)) ok = true;
+      }
+      return ok;
+    }
+
+    spawnBullet(t, a, spd, size, dmg, homing, seq) {
+      if (this.bullets.length >= C.MAX_BULLETS) return false;
+      const cos = Math.cos(a), sin = Math.sin(a);
       let bx = t.x + cos * (t.r + 4), by = t.y + sin * (t.r + 4);
       if (TG.bulletBlocked(bx, by, size, this.map) || !TG.lineOfSight(this.map, t.x, t.y, bx, by, 0)) {
         bx = t.x; by = t.y;
-        if (TG.bulletBlocked(bx, by, size, this.map)) return false;
+        const hit = TG.bulletBlocked(bx, by, size, this.map);
+        if (hit) {
+          // выстрел вплотную в разрушаемый блок — сразу наносим урон
+          if (hit !== true && hit.dyn) this.hitDyn(hit, dmg, t);
+          return false;
+        }
       }
-      let id = this.nextBulletId++;
+      const id = this.nextBulletId++;
       if (this.nextBulletId > 65000) this.nextBulletId = 1;
       this.bullets.push({
         id, x: bx, y: by, vx: cos * spd, vy: sin * spd, size, owner: t.id, team: t.team,
-        big: size > 9, life: C.BULLET_LIFE, seq: seq || 0
+        big: size > 9, dmg, homing, life: C.BULLET_LIFE, seq: seq || 0, nc: !!(t.kd && t.kd.boss)
       });
       return true;
     }
@@ -184,8 +237,12 @@
     applyInput(p, inp) {
       const t = p.tank;
       p.ackSeq = inp.seq;
-      if (inp.up) this.chooseUpgrade(p, inp.up - 1);
+      const act = inp.up | 0;
+      if (act >= 1 && act <= 3) this.chooseUpgrade(p, act - 1);
       if (!t || !t.alive || this.over || this.mode.frozen) return;
+      if (act === 4) this.placeBlock(t);
+      else if (act >= 16 && act < 48 && this.mode.buy) this.mode.buy(t, act - 16);
+      if (t.stunUntil > this.tick) return;
       t.a = inp.a;
       TG.moveTank(t, inp.mx, inp.my, this.map);
       if (t.cd > 0) t.cd--;
@@ -197,17 +254,19 @@
     }
 
     // ---------- Урон ----------
-    damage(t, src) {
+    damage(t, src, dmg) {
       if (!t.alive) return;
-      if (t.hp > 1) {
-        t.hp--;
-        t.iframeUntil = this.tick + (t.isBot ? 8 : 40);
-        this.emit({ k: 'hit', x: t.x, y: t.y, c: this.tankColor(t), tid: t.id });
+      dmg = dmg || 1;
+      if (t.hp > dmg) {
+        t.hp -= dmg;
+        t.iframeUntil = this.tick + (t.isBot ? 6 : 45);
+        this.emit({ k: 'hit', x: t.x, y: t.y, c: this.tankColor(t), tid: t.id, d: dmg, sid: src ? src.id || 0 : 0 });
         if (this.mode.onHit) this.mode.onHit(t, src);
       } else if (t.extraLife) {
         t.extraLife = false;
+        t.hp = 1;
         t.iframeUntil = this.tick + 60;
-        this.emit({ k: 'hit', x: t.x, y: t.y, c: [255, 200, 200], tid: t.id, save: 1 });
+        this.emit({ k: 'hit', x: t.x, y: t.y, c: [255, 200, 200], tid: t.id, save: 1, d: dmg });
       } else {
         this.kill(t, src);
       }
@@ -218,14 +277,24 @@
       t.hp = 0;
       t.deaths++;
       t.vx = t.vy = 0;
-      if (src && src !== t) { src.kills++; }
+      t.streak = 0;
+      if (src && src.id && src !== t) {
+        src.kills++;
+        src.streak++;
+        src.multiKill = this.tick - src.lastKill < 300 ? src.multiKill + 1 : 1;
+        src.lastKill = this.tick;
+        if (src.pid && src.multiKill >= 2) this.emit({ k: 'streak', tid: src.id, n: src.multiKill });
+        else if (src.pid && src.streak >= 5 && src.streak % 5 === 0) this.emit({ k: 'streak', tid: src.id, s: src.streak });
+      }
       for (const f of this.flags) if (f.carrier === t) this.dropFlag(f, t.x, t.y);
-      this.emit({ k: 'boom', x: t.x, y: t.y, c: this.tankColor(t), n: 50, tid: t.id });
+      const big = t.kd && t.kd.boss;
+      this.emit({ k: 'boom', x: t.x, y: t.y, c: this.tankColor(t), n: big ? 120 : 50, tid: t.id, big: big ? 1 : 0 });
+      const killer = src && src.id ? src : null;
       this.emit({
         k: 'kill', v: t.name, vc: this.tankColor(t), vid: t.id,
-        s: src ? src.name : '', sc: src ? this.tankColor(src) : null, sid: src ? src.id : 0
+        s: killer ? killer.name : '', sc: killer ? this.tankColor(killer) : null, sid: killer ? killer.id : 0
       });
-      this.mode.onKill(t, src);
+      this.mode.onKill(t, killer);
     }
 
     dropFlag(f, x, y) {
@@ -240,16 +309,95 @@
     tankColor(t) {
       if (this.mode.teamColors && TG.TEAM_COLORS[t.team]) return TG.TEAM_COLORS[t.team];
       if (t.pid) { const p = this.players.get(t.pid); if (p) return p.color; }
+      if (t.kd) return t.kd.c;
       return TG.BOT_COLOR;
     }
 
     emit(e) { e.tk = this.tick; this.events.push(e); }
 
-    // ---------- Бусты ----------
-    spawnBoost(region, avoidRects) {
+    // ---------- Разрушаемые препятствия (блоки, ядра) ----------
+    addDyn(o) {
+      o.id = this.nextDynId++;
+      o.dyn = 1;
+      this.map.obstacles.push(o);
+      this.dyn.push(o);
+      this.dynChanged(o, true);
+      return o;
+    }
+
+    removeDyn(o) {
+      let i = this.map.obstacles.indexOf(o);
+      if (i >= 0) this.map.obstacles.splice(i, 1);
+      i = this.dyn.indexOf(o);
+      if (i >= 0) this.dyn.splice(i, 1);
+      o.dead = true;
+      this.dynChanged(o, true);
+    }
+
+    dynChanged(o, structural) {
+      this.dynRev++;
+      if (structural) {
+        this.dynStructRev++;
+        if (this.nav) this.nav.update(o);
+      }
+    }
+
+    hitDyn(o, dmg, src) {
+      if (o.dead) return;
+      if (src && o.team && src.team === o.team) return; // свои блоки не ломаются
+      o.hp -= dmg;
+      if (o.hp <= 0) {
+        this.removeDyn(o);
+        this.emit({ k: 'break', x: o.x + o.w / 2, y: o.y + o.h / 2, c: o.team ? TG.TEAM_COLORS[o.team] : [160, 160, 180], core: o.core ? 1 : 0 });
+        if (this.mode.onDynDestroyed) this.mode.onDynDestroyed(o, src);
+      } else {
+        this.dynChanged(o, false);
+        if (o.core && this.mode.onCoreHit) this.mode.onCoreHit(o, src);
+      }
+    }
+
+    placeBlock(t) {
+      if (!this.mode.allowBlocks || t.blocks <= 0) return false;
+      const B = C.BLOCK;
+      let rect = null;
+      // пробуем клетки по направлению прицела: ближняя занята — ставим чуть дальше
+      for (const dist of [t.r + 28, t.r + 44, t.r + 62]) {
+        const tx = t.x + Math.cos(t.a) * dist, ty = t.y + Math.sin(t.a) * dist;
+        const r = { x: Math.floor(tx / B) * B, y: Math.floor(ty / B) * B, w: B, h: B };
+        if (r.x < 0 || r.y < 0 || r.x + B > this.map.w || r.y + B > this.map.h) continue;
+        let bad = false;
+        for (const o of this.map.obstacles) if (TG.rectsGap(r, o, -0.5)) { bad = true; break; }
+        if (!bad) for (const k of this.tanks) if (k.alive && TG.circleRect(k.x, k.y, k.r + 2, r)) { bad = true; break; }
+        if (!bad && this.mode.canPlace && !this.mode.canPlace(r, t)) bad = true;
+        if (!bad) { rect = r; break; }
+      }
+      if (!rect) return false;
+      t.blocks--;
+      this.addDyn({ x: rect.x, y: rect.y, w: B, h: B, hp: 4, maxHp: 4, team: t.team });
+      this.emit({ k: 'place', x: rect.x + B / 2, y: rect.y + B / 2, tid: t.id });
+      return true;
+    }
+
+    dynList() {
+      const out = [];
+      for (const o of this.dyn) out.push(o.id, o.x, o.y, o.w, o.h, Math.max(0, Math.ceil(o.hp)), o.maxHp, o.team || 0, o.core ? 1 : 0);
+      return out;
+    }
+
+    // ---------- Бусты и предметы ----------
+    randomBoostType() {
+      const pool = this.mode.boostPool || TG.BOOSTS;
+      return U.weighted(pool, (k) => TG.BOOST_INFO[k].w);
+    }
+
+    spawnBoost(region, avoidRects, type) {
       const spot = TG.findSpot(this.map, { r: 16, region, avoidRects });
       for (const b of this.boosts) if (U.dist2(b.x, b.y, spot.x, spot.y) < 900) return null;
-      const b = { id: this.nextBoostId++, x: Math.round(spot.x), y: Math.round(spot.y), type: U.choice(TG.BOOSTS) };
+      return this.addBoost(spot.x, spot.y, type || this.randomBoostType());
+    }
+
+    addBoost(x, y, type) {
+      const b = { id: this.nextBoostId++, x: Math.round(x), y: Math.round(y), type };
       if (this.nextBoostId > 65000) this.nextBoostId = 1;
       this.boosts.push(b);
       return b;
@@ -257,19 +405,38 @@
 
     applyBoost(t, type) {
       const tk = this.tick;
+      const info = TG.BOOST_INFO[type];
       switch (type) {
-        case 'speed': t.speedUntil = tk + C.BOOST_TIME; break;
-        case 'bullet': t.bigUntil = tk + C.BOOST_TIME; break;
-        case 'shield': t.shieldUntil = Math.max(t.shieldUntil, tk + C.SHIELD_TIME); break;
-        case 'gatling': t.gatlingUntil = tk + C.GATLING_TIME; break;
-        case 'mini': t.miniUntil = tk + C.MINI_TIME; t.r = C.MINI_R; break;
-        case 'fast_bullet': t.fastUntil = tk + C.FAST_TIME; break;
+        case 'speed': t.speedUntil = tk + info.dur; break;
+        case 'shield': t.shieldUntil = Math.max(t.shieldUntil, tk + info.dur); break;
+        case 'rapid': t.rapidUntil = tk + info.dur; break;
+        case 'big': t.bigUntil = tk + info.dur; break;
+        case 'triple': t.tripleUntil = tk + info.dur; break;
+        case 'homing': t.homingUntil = tk + info.dur; break;
+        case 'damage': t.damageUntil = tk + info.dur; break;
+        case 'invis': t.invisUntil = tk + info.dur; break;
+        case 'emp': this.emp(t); break;
         case 'health':
-          if (t.maxHp > 1 && t.hp < t.maxHp) t.hp++;
-          else if (t.maxHp > 1) t.hp = t.maxHp;
+          if (t.hp < t.maxHp) t.hp++;
           else t.extraLife = true;
           break;
       }
+    }
+
+    emp(src) {
+      const R2 = 290 * 290;
+      for (const t of this.tanks) {
+        if (!t.alive || !this.isHostile(src, t)) continue;
+        if (U.dist2(t.x, t.y, src.x, src.y) > R2) continue;
+        if (t.shieldUntil > this.tick) continue;
+        t.stunUntil = this.tick + 90;
+      }
+      for (const b of this.bullets) {
+        if (b.team !== 0 && b.team === src.team) continue;
+        if (b.owner === src.id) continue;
+        if (U.dist2(b.x, b.y, src.x, src.y) < R2) b.dead = true;
+      }
+      this.emit({ k: 'emp', x: src.x, y: src.y, tid: src.id });
     }
 
     // ---------- Основной шаг симуляции ----------
@@ -277,7 +444,6 @@
       this.tick++;
       const tick = this.tick;
       if (this.over) return;
-      const map = this.map;
       this.mode.tick();
       if (this.over) return;
 
@@ -302,18 +468,19 @@
           if (!t.isBot || !t.alive) continue;
           const ox = t.x, oy = t.y;
           if (t.cd > 0) t.cd--;
+          if (t.stunUntil > tick) { t.vx = t.vy = 0; continue; }
           this.mode.botThink(t);
-          t.vx = t.x - ox; t.vy = t.y - oy;
+          t.vx = t.vx * 0.4 + (t.x - ox) * 0.6; t.vy = t.vy * 0.4 + (t.y - oy) * 0.6;
         }
       }
 
       // Статусы танков
       for (const t of this.tanks) {
         if (!t.alive) continue;
-        t.speed = t.baseSpeed * (t.speedUntil > tick ? 2 : 1);
-        if (t.miniUntil && t.miniUntil <= tick) {
-          t.miniUntil = 0; t.r = t.baseR; TG.unstick(t, map);
-        }
+        t.speed = t.baseSpeed * (t.speedUntil > tick ? 1.7 : 1);
+        if (t.regen && t.hp < t.maxHp) {
+          if (++t.regenT >= Math.round(540 / t.regen)) { t.hp++; t.regenT = 0; }
+        } else t.regenT = 0;
       }
 
       this.updateBullets();
@@ -323,10 +490,28 @@
       const bi = this.mode.boostInterval;
       if (bi && ++this.boostTimer >= bi) {
         this.boostTimer = 0;
-        if (this.boosts.length < (this.mode.maxBoosts || 8)) this.spawnBoost(this.mode.boostRegion, this.mode.boostAvoid);
+        let nb = 0;
+        for (const b of this.boosts) if (TG.BOOST_INFO[b.type]) nb++;
+        if (nb < (this.mode.maxBoosts || 8)) this.spawnBoost(this.mode.boostRegion, this.mode.boostAvoid);
       }
 
-      this.mode.postTick && this.mode.postTick();
+      if (this.mode.postTick) this.mode.postTick();
+    }
+
+    homingTarget(b) {
+      let best = null, bd = 380 * 380;
+      const sp = Math.hypot(b.vx, b.vy) || 1;
+      for (const t of this.tanks) {
+        if (!t.alive || t.id === b.owner) continue;
+        if (b.team !== 0 && b.team === t.team) continue;
+        if (t.invisUntil > this.tick) continue;
+        const dx = t.x - b.x, dy = t.y - b.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= bd) continue;
+        if ((dx * b.vx + dy * b.vy) / (Math.sqrt(d2) * sp + 1e-6) < 0.25) continue;
+        bd = d2; best = t;
+      }
+      return best;
     }
 
     updateBullets() {
@@ -335,8 +520,23 @@
       let w = 0;
       for (let i = 0; i < bullets.length; i++) {
         const b = bullets[i];
-        if (--b.life <= 0) continue;
+        if (b.dead || --b.life <= 0) continue;
+        if (b.homing) {
+          const tg = this.homingTarget(b);
+          if (tg) {
+            const sp = Math.hypot(b.vx, b.vy);
+            const cur = Math.atan2(b.vy, b.vx);
+            const want = Math.atan2(tg.y - b.y, tg.x - b.x);
+            const na = cur + U.clamp(U.angDiff(want, cur), -0.06, 0.06);
+            b.vx = Math.cos(na) * sp; b.vy = Math.sin(na) * sp;
+          }
+        }
         TG.stepBullet(b, map);
+        if (b.hitObs) {
+          const src = this.tankMap.get(b.owner);
+          this.hitDyn(b.hitObs, b.dmg, src || { team: b.team });
+          continue;
+        }
         bullets[w++] = b;
       }
       bullets.length = w;
@@ -348,7 +548,7 @@
         if (a.dead) continue;
         for (let j = i + 1; j < n; j++) {
           const b = bullets[j];
-          if (b.dead || a.owner === b.owner) continue;
+          if (b.dead || a.owner === b.owner || a.nc || b.nc) continue;
           if (a.team !== 0 && a.team === b.team) continue;
           const dx = a.x - b.x, dy = a.y - b.y;
           if (dx * dx + dy * dy >= 400) continue;
@@ -372,7 +572,7 @@
           const dx = b.x - t.x, dy = b.y - t.y;
           if (dx * dx + dy * dy >= rr * rr) continue;
           b.dead = true;
-          if (!this.isInvincible(t)) this.damage(t, this.tankMap.get(b.owner) || null);
+          if (!this.isInvincible(t)) this.damage(t, this.tankMap.get(b.owner) || null, b.dmg || 1);
           break;
         }
       }
@@ -385,13 +585,20 @@
     pickBoosts() {
       if (!this.boosts.length) return;
       for (const t of this.tanks) {
-        if (!t.alive || t.noBoosts) continue;
+        if (!t.alive) continue;
         for (let i = this.boosts.length - 1; i >= 0; i--) {
           const b = this.boosts[i];
-          const rr = t.r + 15;
-          if (U.dist2(t.x, t.y, b.x, b.y) < rr * rr) {
+          const item = TG.ITEMS[b.type];
+          if (!item && t.noBoosts) continue;
+          if (item && t.kd && t.kd.turret) continue;
+          const rr = t.r + (item ? 18 : 15);
+          if (U.dist2(t.x, t.y, b.x, b.y) >= rr * rr) continue;
+          this.boosts.splice(i, 1);
+          if (item) {
+            t.coins += item.v;
+            this.emit({ k: 'coin', x: b.x, y: b.y, tid: t.id, v: item.v });
+          } else {
             this.applyBoost(t, b.type);
-            this.boosts.splice(i, 1);
             this.emit({ k: 'pick', x: b.x, y: b.y, b: b.type, tid: t.id });
           }
         }
@@ -409,7 +616,7 @@
     scoreboard() {
       const rows = [];
       for (const t of this.tanks) {
-        if (t.isBot && !this.mode.botsOnBoard) continue;
+        if (t.isBot && (!this.mode.botsOnBoard || (t.kd && t.kd.turret))) continue;
         const p = t.pid ? this.players.get(t.pid) : null;
         rows.push({ id: t.id, pid: t.pid, name: t.name, c: this.tankColor(t), team: t.team, k: t.kills, d: t.deaths, s: t.score, lvl: t.level, bot: t.isBot ? 1 : 0, off: p && !p.connected ? 1 : 0 });
       }
@@ -418,6 +625,25 @@
     }
 
     // ---------- Снапшот (для сети и локального рендера) ----------
+    tankFlags(t) {
+      const tick = this.tick;
+      let f = 0;
+      if (t.alive) f |= F.alive;
+      if (t.shieldUntil > tick || (!t.isBot && this.admin && this.admin.god_mode)) f |= F.shield;
+      if (t.iframeUntil > tick) f |= F.iframe;
+      if (t.extraLife) f |= F.extra;
+      if (t.speedUntil > tick) f |= F.speed;
+      if (t.bigUntil > tick) f |= F.big;
+      if (t.rapidUntil > tick) f |= F.rapid;
+      if (t.tripleUntil > tick) f |= F.triple;
+      if (t.homingUntil > tick) f |= F.homing;
+      if (t.carrying) f |= F.flag;
+      if (t.damageUntil > tick) f |= F.damage;
+      if (t.invisUntil > tick) f |= F.invis;
+      if (t.stunUntil > tick) f |= F.stun;
+      return f;
+    }
+
     snapshot(pid, cull) {
       const tick = this.tick;
       const p = pid != null ? this.players.get(pid) : null;
@@ -426,44 +652,38 @@
       const cullT = cull && me && me.alive;
       for (const t of this.tanks) {
         // на больших картах далёких ботов противника не отправляем (экономия трафика)
-        if (cullT && t.isBot && !t.carrying && (t.team === 0 || t.team !== me.team) && (Math.abs(t.x - me.x) > 1500 || Math.abs(t.y - me.y) > 1100)) continue;
-        let f = 0;
-        if (t.alive) f |= 1;
-        if (t.shieldUntil > tick || (!t.isBot && this.admin && this.admin.god_mode)) f |= 2;
-        if (t.iframeUntil > tick) f |= 4;
-        if (t.extraLife) f |= 8;
-        if (t.speedUntil > tick) f |= 16;
-        if (t.bigUntil > tick) f |= 32;
-        if (t.gatlingUntil > tick) f |= 64;
-        if (t.fastUntil > tick) f |= 128;
-        if (t.miniUntil > tick) f |= 256;
-        if (t.carrying) f |= 512;
-        tanks.push({ id: t.id, pid: t.pid, x: t.x, y: t.y, a: t.a, r: t.r, hp: t.hp, maxHp: t.maxHp, lvl: t.lvl, team: t.team, f });
+        if (cullT && t.isBot && !t.carrying && !(t.kd && t.kd.boss) && (t.team === 0 || t.team !== me.team) && (Math.abs(t.x - me.x) > 1500 || Math.abs(t.y - me.y) > 1100)) continue;
+        tanks.push({ id: t.id, pid: t.pid, x: t.x, y: t.y, a: t.a, r: t.r, hp: t.hp, maxHp: t.maxHp, lvl: t.kind, team: t.team, f: this.tankFlags(t) });
       }
       const bullets = [];
       const cx = me ? me.x : 0, cy = me ? me.y : 0;
-      const useCull = cull && me && me.alive;
       for (const b of this.bullets) {
-        if (useCull && b.owner !== me.id && (Math.abs(b.x - cx) > 1500 || Math.abs(b.y - cy) > 1100)) continue;
-        bullets.push({ id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, size: b.size, owner: b.owner });
+        if (cullT && b.owner !== me.id && (Math.abs(b.x - cx) > 1500 || Math.abs(b.y - cy) > 1100)) continue;
+        bullets.push({ id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, size: b.size, owner: b.owner, fl: (b.big ? 1 : 0) | (b.homing ? 2 : 0) | (b.dmg > 1 ? 4 : 0) });
       }
       const flags = this.flags.map((fl) => ({
         x: fl.x, y: fl.y, team: fl.team, carrier: fl.carrier ? fl.carrier.id : 0,
         home: fl.x === fl.homeX && fl.y === fl.homeY && !fl.carrier ? 1 : 0,
         ret: fl.returnStart ? Math.min(255, Math.floor(((tick - fl.returnStart) / fl.returnTime) * 255)) : 0
       }));
+      const boosts = [];
+      for (const b of this.boosts) {
+        const item = TG.ITEMS[b.type];
+        boosts.push({ id: b.id, x: b.x, y: b.y, type: item ? item.id : TG.BOOSTS.indexOf(b.type) });
+      }
       return {
         tick, ack: p ? p.ackSeq : 0,
-        me: me ? { id: me.id, x: me.x, y: me.y, speed: me.speed, r: me.r, cd: me.cd, rate: this.rateOf(me), alive: me.alive ? 1 : 0 } : null,
-        tanks, bullets, boosts: this.boosts.map((b) => ({ id: b.id, x: b.x, y: b.y, type: TG.BOOSTS.indexOf(b.type) })), flags
+        me: me ? { id: me.id, x: me.x, y: me.y, speed: me.speed, r: me.r, cd: me.cd, rate: this.rateOf(me), alive: (me.alive ? 1 : 0) | (me.stunUntil > tick ? 2 : 0) } : null,
+        tanks, bullets, boosts, flags
       };
     }
 
     roundInfo() {
       return {
         mode: this.modeId, options: this.options, w: this.map.w, h: this.map.h,
-        obstacles: this.map.obstacles, bases: this.map.bases, teamColors: !!this.mode.teamColors,
-        title: this.mode.title(), tick: this.tick, big: this.map.w > 1300 || this.map.h > 1000
+        obstacles: this.map.obstacles.filter((o) => !o.dyn), bases: this.map.bases, teamColors: !!this.mode.teamColors,
+        title: this.mode.title(), tick: this.tick, big: this.map.w > 1300 || this.map.h > 1000,
+        dyn: this.dynList(), dynRev: this.dynRev, pads: this.map.pads || null
       };
     }
   }

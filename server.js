@@ -11,7 +11,7 @@ const os = require('os');
 const { performance } = require('perf_hooks');
 
 const PUBLIC = path.join(__dirname, 'public');
-for (const f of ['core', 'world', 'ai', 'modes', 'proto']) require(path.join(PUBLIC, 'shared', f + '.js'));
+for (const f of ['core', 'data', 'world', 'ai', 'modes', 'proto']) require(path.join(PUBLIC, 'shared', f + '.js'));
 const TG = globalThis.TG;
 const C = TG.C;
 
@@ -242,7 +242,7 @@ function newCode() {
   }
 }
 
-const MODE_IDS = ['levels', 'waves', 'survival', 'ctf', 'arena'];
+const MODE_IDS = ['levels', 'waves', 'survival', 'ctf', 'arena', 'bedwars', 'royale'];
 const validMode = (m) => typeof m === 'string' && MODE_IDS.includes(m);
 
 function cleanName(n) {
@@ -259,9 +259,11 @@ function cleanOpts(mode, o) {
   o = o && typeof o === 'object' ? o : {};
   const n = (v, a, b, d) => { v = Number(v); return Number.isFinite(v) ? Math.max(a, Math.min(b, Math.round(v))) : d; };
   switch (mode) {
-    case 'levels': return { level: n(o.level, 1, 20, 1) };
+    case 'levels': return { level: n(o.level, 1, TG.CAMPAIGN.length, 1), cdiff: n(o.cdiff, 1, 3, 2) };
     case 'ctf': return { teamSize: n(o.teamSize, 1, 10, 5), diff: n(o.diff, 1, 4, 2), caps: n(o.caps, 1, 5, 3), time: n(o.time, 5, 15, 10) };
     case 'arena': return { bots: n(o.bots, 0, 10, 2), diff: n(o.diff, 1, 4, 2), kills: n(o.kills, 5, 30, 10), teams: !!o.teams };
+    case 'bedwars': return { teams: n(o.teams, 2, 4, 2) === 4 ? 4 : 2, size: n(o.size, 1, 4, 2), diff: n(o.diff, 1, 4, 2), time: n(o.time, 10, 20, 15) };
+    case 'royale': return { total: [6, 10, 16, 24].includes(+o.total) ? +o.total : 10, diff: n(o.diff, 1, 4, 2), fast: !!o.fast };
     default: return {};
   }
 }
@@ -374,6 +376,7 @@ class Room {
   sendStart(m) {
     if (!m.conn) return;
     m.conn.lastHud = ''; m.conn.lastPers = ''; m.conn.sbTick = 0;
+    m.conn.dynRev = this.world.dynRev; m.conn.dynStructRev = this.world.dynStructRev; m.conn.dynT = this.world.tick;
     const p = this.world.players.get(m.pid);
     if (p && this.world.mode.teamColors) m.team = p.team;
     m.conn.ws.send(JSON.stringify({ t: 'start', info: this.world.roundInfo(), pid: m.pid }));
@@ -394,7 +397,7 @@ class Room {
     if (w.over && this.state === 'playing') { this.state = 'post'; this.postTimer = 150; }
     if (this.state === 'post' && this.postTimer > 0 && --this.postTimer === 0) {
       this.result = w.result;
-      if (this.mode === 'levels' && w.result.win) this.result.next = this.opts.level < 20;
+      if (this.mode === 'levels' && w.result.win) this.result.next = this.opts.level < TG.CAMPAIGN.length;
       this.broadcast(JSON.stringify({ t: 'end', result: this.result }));
       this.broadcastInfo();
     }
@@ -409,7 +412,7 @@ class Room {
     this.lastHud = hud;
     const events = w.events.length ? w.events.map(stripEvent) : null;
     w.events.length = 0;
-    let sb = null;
+    let sb = null, dyn = null;
     for (const m of this.members.values()) {
       const c = m.conn;
       if (!c) continue;
@@ -422,6 +425,11 @@ class Room {
       const pers = w.mode.personal(p);
       const ps = pers ? JSON.stringify(pers) : '';
       if (ps !== c.lastPers) { extra.p = pers; c.lastPers = ps; has = true; }
+      // разрушаемые блоки: при изменении структуры — сразу, при изменении прочности — не чаще 8 раз в секунду
+      if (c.dynRev !== w.dynRev && (c.dynStructRev !== w.dynStructRev || w.tick - (c.dynT || 0) >= 8)) {
+        if (!dyn) dyn = w.dynList();
+        extra.ob = dyn; c.dynRev = w.dynRev; c.dynStructRev = w.dynStructRev; c.dynT = w.tick; has = true;
+      }
       if (events) { extra.e = events; has = true; }
       if (w.tick - (c.sbTick || 0) >= 60) {
         if (!sb) sb = w.scoreboard();
@@ -544,7 +552,7 @@ function handle(client, msg) {
       break;
     case 'team':
       if (!me || !room) return;
-      me.team = msg.team === 1 || msg.team === 2 ? msg.team : 0;
+      me.team = [1, 2, 3, 4].includes(msg.team) ? msg.team : 0;
       room.broadcastInfo();
       break;
     case 'start':
@@ -553,7 +561,7 @@ function handle(client, msg) {
     case 'post':
       if (!isHost || room.state !== 'post') return;
       if (msg.act === 'next' && room.mode === 'levels' && room.result && room.result.win) {
-        room.opts.level = Math.min(20, room.opts.level + 1);
+        room.opts.level = Math.min(TG.CAMPAIGN.length, room.opts.level + 1);
         room.startRound();
       } else if (msg.act === 'again') room.startRound();
       else if (msg.act === 'lobby') room.toLobby();

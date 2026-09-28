@@ -9,86 +9,42 @@
     TICK_MS: 1000 / TICK_RATE,
     SNAP_EVERY: 2,              // снапшот каждые 2 тика (30 Гц)
     TANK_R: 20,
-    MINI_R: 10,
-    BULLET_SPEED: 5.4,
+    BULLET_SPEED: 5.6,
     BULLET_SIZE: 6,
     BULLET_LIFE: 300,           // 5 с
-    PLAYER_RATE: 30,            // 500 мс
-    GATLING_RATE: 12,           // 200 мс
-    BOOST_TIME: 300,            // 5 с
-    SHIELD_TIME: 180,
-    GATLING_TIME: 180,
-    MINI_TIME: 600,
-    FAST_TIME: 240,
-    BOOST_INTERVAL: 384,        // 6.4 с
+    PLAYER_RATE: 28,            // ~470 мс
+    RAPID_RATE: 11,
+    BOOST_INTERVAL: 360,        // 6 с
     POS_SCALE: 16,
     MAX_MAP: 4000,
     MAX_PLAYERS: 8,
-    MAX_BULLETS: 600
+    MAX_BULLETS: 700,
+    BLOCK: 40
   };
 
   // ---------- Цвета, формы ----------
   TG.PLAYER_COLORS = {
     Green: [0, 255, 100], Blue: [0, 120, 255], Yellow: [255, 200, 0], Red: [255, 60, 60],
     Purple: [200, 50, 255], Orange: [255, 140, 0], Cyan: [0, 255, 255], Pink: [255, 100, 200],
-    White: [255, 255, 255], Lime: [150, 255, 50]
+    White: [255, 255, 255], Lime: [150, 255, 50], Gold: [255, 215, 90], Sky: [110, 190, 255],
+    Mint: [120, 255, 200], Magenta: [255, 40, 200], Coral: [255, 120, 110], Violet: [140, 110, 255]
   };
   TG.COLOR_RU = {
     Green: 'Зелёный', Blue: 'Синий', Yellow: 'Жёлтый', Red: 'Красный', Purple: 'Фиолетовый',
-    Orange: 'Оранжевый', Cyan: 'Бирюзовый', Pink: 'Розовый', White: 'Белый', Lime: 'Лайм'
+    Orange: 'Оранжевый', Cyan: 'Бирюзовый', Pink: 'Розовый', White: 'Белый', Lime: 'Лайм',
+    Gold: 'Золотой', Sky: 'Небесный', Mint: 'Мятный', Magenta: 'Маджента', Coral: 'Коралловый', Violet: 'Лиловый'
   };
   TG.SHAPES = ['Circle', 'Square', 'Triangle', 'Star', 'Pentagon', 'Hexagon', 'Diamond'];
   TG.SHAPE_RU = {
     Circle: 'Круг', Square: 'Квадрат', Triangle: 'Треугольник', Star: 'Звезда',
     Pentagon: 'Пятиугольник', Hexagon: 'Шестиугольник', Diamond: 'Ромб'
   };
-  TG.TEAM_COLORS = { 1: [50, 150, 255], 2: [255, 60, 60] };
-  TG.TEAM_NAMES = { 1: 'СИНИЕ', 2: 'КРАСНЫЕ' };
+  TG.TEAM_COLORS = { 1: [50, 150, 255], 2: [255, 60, 60], 3: [60, 225, 100], 4: [255, 205, 40] };
+  TG.TEAM_NAMES = { 1: 'СИНИЕ', 2: 'КРАСНЫЕ', 3: 'ЗЕЛЁНЫЕ', 4: 'ЖЁЛТЫЕ' };
+  TG.TEAM_ADJ = { 1: 'СИНЕЙ', 2: 'КРАСНОЙ', 3: 'ЗЕЛЁНОЙ', 4: 'ЖЁЛТОЙ' };
+  TG.TEAM_GEN = { 1: 'синих', 2: 'красных', 3: 'зелёных', 4: 'жёлтых' };
   TG.BOT_COLOR = [255, 50, 50];
-
-  TG.BOOSTS = ['speed', 'bullet', 'shield', 'gatling', 'mini', 'fast_bullet', 'health'];
-  TG.BOOST_INFO = {
-    speed:       { c: [255, 200, 0],   name: 'Скорость x2' },
-    bullet:      { c: [40, 120, 255],  name: 'Большие пули' },
-    shield:      { c: [255, 255, 100], name: 'Щит' },
-    gatling:     { c: [255, 100, 255], name: 'Пулемёт' },
-    mini:        { c: [100, 255, 255], name: 'Мини-танк' },
-    fast_bullet: { c: [255, 150, 0],   name: 'Быстрые пули' },
-    health:      { c: [255, 50, 100],  name: 'Здоровье' }
-  };
-
-  // Уровни (rate в тиках при 60 FPS, как в оригинале в мс)
-  const ms = (v) => Math.max(1, Math.round(v / (1000 / TICK_RATE)));
-  TG.LEVELS = {
-    1:  { move: 'static',  aim: 'random',     rate: ms(2500) },
-    2:  { move: 'static',  aim: 'player',     rate: ms(2000) },
-    3:  { move: 'random',  aim: 'random',     rate: ms(2000) },
-    4:  { move: 'random',  aim: 'player',     rate: ms(2000) },
-    5:  { move: 'random',  aim: 'player',     rate: ms(1200) },
-    6:  { move: 'smart',   aim: 'player',     rate: ms(1000), seek: true },
-    7:  { move: 'smart',   aim: 'player',     rate: ms(900),  seek: true },
-    8:  { move: 'smart',   aim: 'player',     rate: ms(400),  seek: true },
-    9:  { move: 'smart',   aim: 'predictive', rate: ms(600),  seek: true },
-    10: { move: 'berserk', aim: 'predictive', rate: ms(300),  seek: true },
-    11: { move: 'smart',   aim: 'predictive', rate: ms(500),  seek: true, survive: true },
-    12: { move: 'berserk', aim: 'player',     rate: ms(250),  seek: true, survive: true },
-    13: { move: 'smart',   aim: 'predictive', rate: ms(400),  seek: true, survive: true },
-    14: { move: 'smart',   aim: 'predictive', rate: ms(300),  seek: true, survive: true },
-    15: { move: 'berserk', aim: 'predictive', rate: ms(200),  seek: true, survive: true, matrix: true },
-    16: { move: 'smart',   aim: 'predictive', rate: ms(150),  seek: true, survive: true, matrix: true },
-    17: { move: 'berserk', aim: 'predictive', rate: ms(120),  seek: true, survive: true, matrix: true },
-    18: { move: 'smart',   aim: 'predictive', rate: ms(100),  seek: true, survive: true, matrix: true },
-    19: { move: 'berserk', aim: 'predictive', rate: ms(80),   seek: true, survive: true, matrix: true },
-    20: { move: 'god',     aim: 'god',        rate: ms(50),   seek: false, survive: true, matrix: true }
-  };
-  TG.msToTicks = ms;
-
-  TG.botShape = function (lvl) {
-    if (lvl > 15) return 'Diamond';
-    if (lvl > 10) return 'Pentagon';
-    if (lvl > 5) return 'Triangle';
-    return 'Square';
-  };
+  TG.msToTicks = (v) => Math.max(1, Math.round(v / (1000 / TICK_RATE)));
 
   // ---------- Утилиты ----------
   const U = TG.U = {
@@ -98,7 +54,15 @@
     choice: (arr) => arr[Math.floor(Math.random() * arr.length)],
     dist2: (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; },
     angDiff: (a, b) => { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2; return d; },
-    shuffle: (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = arr[i]; arr[i] = arr[j]; arr[j] = t; } return arr; }
+    shuffle: (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = arr[i]; arr[i] = arr[j]; arr[j] = t; } return arr; },
+    gauss: () => { let s = 0; for (let i = 0; i < 4; i++) s += Math.random(); return (s - 2) / 0.577; },
+    weighted: (items, wfn) => {
+      let tot = 0;
+      for (const it of items) tot += wfn(it);
+      let r = Math.random() * tot;
+      for (const it of items) { r -= wfn(it); if (r <= 0) return it; }
+      return items[items.length - 1];
+    }
   };
 
   // ---------- Геометрия ----------
@@ -123,12 +87,13 @@
   }
   TG.tankBlocked = tankBlocked;
 
+  // Возвращает: false — свободно, true — граница карты, объект — препятствие
   function bulletBlocked(x, y, s, map) {
     if (x - s < 0 || y - s < 0 || x + s > map.w || y + s > map.h) return true;
     const obs = map.obstacles;
     for (let i = 0; i < obs.length; i++) {
       const o = obs[i];
-      if (x - s < o.x + o.w && x + s > o.x && y - s < o.y + o.h && y + s > o.y) return true;
+      if (x - s < o.x + o.w && x + s > o.x && y - s < o.y + o.h && y + s > o.y) return o;
     }
     return false;
   }
@@ -157,18 +122,36 @@
   }
   TG.segRect = segRect;
 
-  TG.lineOfSight = function (map, x1, y1, x2, y2, pad) {
+  // ignore — препятствие, которое не учитывается (например, цель-ядро)
+  TG.lineOfSight = function (map, x1, y1, x2, y2, pad, ignore) {
     const obs = map.obstacles;
-    for (let i = 0; i < obs.length; i++) if (segRect(x1, y1, x2, y2, obs[i], pad || 0)) return false;
+    for (let i = 0; i < obs.length; i++) {
+      const o = obs[i];
+      if (o === ignore) continue;
+      if (segRect(x1, y1, x2, y2, o, pad || 0)) return false;
+    }
     return true;
   };
 
+  // Ближайшее разрушаемое препятствие на отрезке (или null)
+  TG.firstDynOnSegment = function (map, x1, y1, x2, y2, pad) {
+    let best = null, bd = Infinity;
+    for (const o of map.obstacles) {
+      if (!o.dyn || !segRect(x1, y1, x2, y2, o, pad || 0)) continue;
+      const d = (o.x + o.w / 2 - x1) ** 2 + (o.y + o.h / 2 - y1) ** 2;
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  };
+
   // ---------- Физика танка (детерминированная — одинакова на клиенте и сервере) ----------
+  const CORNER_ANGLES = [Math.PI / 4, -Math.PI / 4, Math.PI * 0.4, -Math.PI * 0.4];
   TG.moveTank = function (t, mx, my, map) {
     let len = Math.hypot(mx, my);
     if (len < 0.02) return;
     if (len > 1) { mx /= len; my /= len; len = 1; }
     const dist = t.speed * len;
+    if (dist <= 0) return;
     const steps = Math.max(1, Math.ceil(dist / 8));
     const sx = (mx / len) * dist / steps, sy = (my / len) * dist / steps;
     const r = t.r;
@@ -202,12 +185,11 @@
       }
     }
   };
-  const CORNER_ANGLES = [Math.PI / 4, -Math.PI / 4, Math.PI * 0.4, -Math.PI * 0.4];
 
-  // Выталкивание танка, если он застрял (например, после окончания «мини»)
+  // Выталкивание танка, если он застрял (например, рядом поставили блок)
   TG.unstick = function (t, map) {
     if (!tankBlocked(t.x, t.y, t.r, map)) return;
-    for (let rad = 4; rad <= 200; rad += 4) {
+    for (let rad = 4; rad <= 240; rad += 4) {
       for (let a = 0; a < 16; a++) {
         const ang = (a / 16) * Math.PI * 2;
         const nx = t.x + Math.cos(ang) * rad, ny = t.y + Math.sin(ang) * rad;
@@ -216,17 +198,28 @@
     }
   };
 
-  // Шаг пули с отскоками (субшаги против «пролёта» сквозь стены)
+  // Шаг пули с отскоками (субшаги против «пролёта» сквозь стены).
+  // Пуля, попавшая в разрушаемое препятствие, останавливается: b.hitObs = препятствие.
   TG.stepBullet = function (b, map) {
     const n = Math.max(1, Math.ceil(Math.max(Math.abs(b.vx), Math.abs(b.vy)) / 8));
     let bounced = false;
     for (let i = 0; i < n; i++) {
       const sx = b.vx / n;
       b.x += sx;
-      if (bulletBlocked(b.x, b.y, b.size, map)) { b.x -= sx; b.vx = -b.vx; bounced = true; }
+      let hit = bulletBlocked(b.x, b.y, b.size, map);
+      if (hit) {
+        b.x -= sx;
+        if (hit !== true && hit.dyn) { b.hitObs = hit; return true; }
+        b.vx = -b.vx; bounced = true;
+      }
       const sy = b.vy / n;
       b.y += sy;
-      if (bulletBlocked(b.x, b.y, b.size, map)) { b.y -= sy; b.vy = -b.vy; bounced = true; }
+      hit = bulletBlocked(b.x, b.y, b.size, map);
+      if (hit) {
+        b.y -= sy;
+        if (hit !== true && hit.dyn) { b.hitObs = hit; return true; }
+        b.vy = -b.vy; bounced = true;
+      }
     }
     return bounced;
   };
@@ -235,6 +228,7 @@
   function rectsGap(a, b, gap) {
     return a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
   }
+  TG.rectsGap = rectsGap;
 
   // opt: {count, minW,maxW,minH,maxH, margin, gap, avoid:[rects], region:{x,y,w,h}}
   TG.genObstacles = function (w, h, opt) {
@@ -273,10 +267,6 @@
       out.push({ x: r.x, y: h - r.y - r.h, w: r.w, h: r.h });
       out.push({ x: w - r.x - r.w, y: h - r.y - r.h, w: r.w, h: r.h });
     }
-    if (opt.center) {
-      const cw = U.randInt(60, 120), ch = U.randInt(60, 120);
-      out.push({ x: Math.round(qw - cw / 2), y: Math.round(qh - ch / 2), w: cw, h: ch });
-    }
     return out;
   };
 
@@ -297,15 +287,17 @@
   TG.findSpot = function (map, opt) {
     const r = opt.r || 25;
     const reg = opt.region || { x: 0, y: 0, w: map.w, h: map.h };
+    const rx0 = Math.max(0, reg.x), ry0 = Math.max(0, reg.y);
+    const rx1 = Math.min(map.w, reg.x + reg.w), ry1 = Math.min(map.h, reg.y + reg.h);
     let minDist = opt.minDist || 0;
     const far = opt.far || [];
     const tanks = opt.avoidTanks || [];
     let best = null, bestScore = -1;
     for (let at = 0; at < 400; at++) {
       if (at > 0 && at % 100 === 0) minDist *= 0.6;
-      const x = U.rand(reg.x + r + 10, reg.x + reg.w - r - 10);
-      const y = U.rand(reg.y + r + 10, reg.y + reg.h - r - 10);
-      if (tankBlocked(x, y, r + 4, map)) continue;
+      const x = U.rand(rx0 + r + 10, rx1 - r - 10);
+      const y = U.rand(ry0 + r + 10, ry1 - r - 10);
+      if (!(x > 0 && y > 0) || tankBlocked(x, y, r + 4, map)) continue;
       let ok = true;
       for (const t of tanks) if (t.alive && U.dist2(x, y, t.x, t.y) < (r + t.r + 12) ** 2) { ok = false; break; }
       if (!ok) continue;

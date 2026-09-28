@@ -2,6 +2,7 @@
 (function (TG) {
   'use strict';
   const UI = TG.UI, R = TG.Render, I = TG.Input, A = TG.Audio, Net = TG.Net;
+  const F = TG.TF;
   const $ = UI.$;
 
   const Game = TG.Game = {
@@ -9,11 +10,42 @@
     liveAim: null, lastScene: null, paused: false, chatOpen: false, showBoard: false, resultOpen: false, pending: null
   };
 
+  const modeOf = (s) => (s ? (s.isNet ? s.info.mode : s.mode) : null);
+
   // ---------- Ввод для симуляции ----------
   Game.sampleInput = function () {
     const active = I.enabled && !Game.paused && !Game.chatOpen && !Game.resultOpen;
     const mv = active ? I.moveVector() : [0, 0];
-    return { mx: mv[0], my: mv[1], a: Game.liveAim != null ? Game.liveAim : 0, fire: active && I.firing(), up: I.takeUpgrade() };
+    return { mx: mv[0], my: mv[1], a: Game.liveAim != null ? Game.liveAim : 0, fire: active && I.firing(), up: I.takeAction() };
+  };
+  Game.act = function (code) { I.act = code; };
+
+  // Помощь в прицеливании на телефоне: доворот к ближайшему врагу в секторе
+  function assistAim(sc, a) {
+    const lvl = I.cfg.aimAssist;
+    if (!lvl || !I.isTouch || !sc || !sc.me) return a;
+    const cone = lvl === 2 ? 0.45 : 0.22;
+    let best = null, bd = Infinity;
+    for (const t of sc.tanks) {
+      if (t.me || !(t.f & F.alive)) continue;
+      if (sc.meTeam && sc.meTeam !== 0 && t.team === sc.meTeam) continue;
+      if (t.f & F.invis) continue;
+      const dx = t.x - sc.me.x, dy = t.y - sc.me.y, d = Math.hypot(dx, dy);
+      if (d > 750) continue;
+      const diff = Math.abs(TG.U.angDiff(Math.atan2(dy, dx), a));
+      if (diff > cone) continue;
+      const score = diff * 400 + d;
+      if (score < bd) { bd = score; best = t; }
+    }
+    if (!best) return a;
+    const want = Math.atan2(best.y - sc.me.y, best.x - sc.me.x);
+    return a + TG.U.angDiff(want, a) * (lvl === 2 ? 0.85 : 0.6);
+  }
+
+  // ---------- Музыка ----------
+  Game.updateMusic = function () {
+    const inGame = !!Game.session && !UI.current;
+    A.startMusic(inGame ? 'battle' : 'menu');
   };
 
   // ---------- Сессии ----------
@@ -31,6 +63,8 @@
     I.enabled = true;
     $('hud-chat').hidden = false;
     updateTouchButtons();
+    Game.updateMusic();
+    if (I.isTouch && UI.settings.autoFs) enterFullscreen(true);
   }
 
   Game.startSolo = function (mode, opts) {
@@ -54,6 +88,7 @@
     $('hud-chat').hidden = true;
     startDemo();
     updateTouchButtons();
+    Game.updateMusic();
   };
 
   Game.exitToMenu = function () {
@@ -73,20 +108,21 @@
     if (!s) return;
     const myTank = s.myTankId, myTeam = s.myTeam();
     const win = !!(res.win || (res.winTeam && res.winTeam === myTeam) || (res.winTank && res.winTank === myTank));
-    const mode = local ? s.mode : s.info.mode;
+    const mode = modeOf(s);
     if (local) {
-      if (mode === 'levels' && res.win) { const lv = s.options.level; if (!UI.progress.levels.includes(lv)) UI.progress.levels.push(lv); }
+      if (mode === 'levels' && res.win && res.level) UI.progress.stars[res.level] = Math.max(UI.progress.stars[res.level] || 0, res.stars || 1);
       if (mode === 'waves' && res.score != null) UI.progress.bestWave = Math.max(UI.progress.bestWave, res.score);
-      if (mode === 'survival') { const me = res.board && res.board.find((r) => r.id === myTank); if (me) UI.progress.bestLevel = Math.max(UI.progress.bestLevel, me.lvl || 0); }
+      if (mode === 'survival' && res.lvl) UI.progress.bestLevel = Math.max(UI.progress.bestLevel, res.lvl);
       UI.saveProgress();
     }
     Game.resultOpen = true;
     Game.chatOpen = false; $('game-chat-form').hidden = true;
     UI.showResult(res, { local, isHost: Game.room && Game.room.host === Game.myPid, win, draw: !!res.draw, mode, meId: myTank });
+    A.buzz(win ? [60, 40, 60, 40, 120] : [200]);
   };
 
   // ---------- Главный цикл ----------
-  let last = performance.now(), fps = 60, sbTimer = 0;
+  let last = performance.now(), fps = 60, sbTimer = 0, hintT = 0;
   function frame(now) {
     requestAnimationFrame(frame);
     let dt = now - last;
@@ -95,10 +131,13 @@
     if (dt > 0) fps = fps * 0.95 + (1000 / dt) * 0.05;
     const s = Game.session;
     if (s) {
-      const me = Game.lastScene && Game.lastScene.me;
+      const sc0 = Game.lastScene;
+      const me = sc0 && sc0.me;
       if (me && me.alive && !Game.paused && !Game.chatOpen) {
         const p = R.worldToScreen(me.x, me.y);
-        Game.liveAim = I.aimAngle(p[0], p[1]);
+        let a = I.aimAngle(p[0], p[1]);
+        if (I.isTouch) a = assistAim(sc0, a);
+        Game.liveAim = a;
       }
       s.update(dt);
       const sc = s.scene();
@@ -107,9 +146,16 @@
         const f = sc.me && sc.me.alive ? sc.me : sc.focus;
         if (f) A.setListener(f.x, f.y);
         R.draw(sc, dt, fps);
-        UI.updateUpgrades(sc.pers, s);
+        UI.updateUpgrades(sc.pers, (i) => Game.act(i));
+        if (UI.shopOpen) {
+          if (!sc.pers || !sc.pers.shop || !sc.me || !sc.me.alive) UI.showShop(false);
+          else UI.renderShop(sc.pers, (i) => Game.act(16 + i));
+        }
+        const bw = !!(sc.pers && sc.pers.shop) && I.isTouch;
+        $('tb-block').hidden = !bw; $('tb-shop').hidden = !bw;
       } else R.draw(null, dt, fps);
       if (Game.showBoard && (sbTimer -= dt) <= 0) { sbTimer = 400; renderBoard(); }
+      if ((hintT -= dt) <= 0) { hintT = 500; $('rotate-hint').hidden = !(I.isTouch && window.innerHeight > window.innerWidth * 1.1); }
     } else if (Game.demo) {
       Game.demo.update(dt);
       R.draw(Game.demo.scene(), dt, fps);
@@ -121,7 +167,7 @@
     if (!s) return;
     const pings = new Map();
     if (Game.room) for (const m of Game.room.members) pings.set(m.pid, m.ping);
-    UI.renderScoreboard(s.scoreboard(), { mode: s.isNet ? s.info.mode : s.mode, meId: s.myTankId, pings: s.isNet ? pings : null });
+    UI.renderScoreboard(s.scoreboard(), { mode: modeOf(s), meId: s.myTankId, pings: s.isNet ? pings : null });
   }
 
   // ---------- Пауза / меню в игре ----------
@@ -131,6 +177,7 @@
     Game.paused = true;
     if (!s.isNet) s.paused = true;
     I.clear();
+    UI.showShop(false);
     $('pause-title').textContent = s.isNet ? 'Меню' : 'Пауза';
     $('pause-restart').hidden = s.isNet;
     $('pause-lobby').hidden = !(s.isNet && Game.room && Game.room.host === Game.myPid);
@@ -146,13 +193,21 @@
     I.enabled = !!Game.session;
   }
 
+  function toggleShop() {
+    const sc = Game.lastScene;
+    if (!sc || !sc.pers || !sc.pers.shop) return;
+    if (!UI.shopOpen && (!sc.me || !sc.me.alive)) return;
+    UI.showShop(!UI.shopOpen);
+    if (UI.shopOpen) UI.renderShop(sc.pers, (i) => Game.act(16 + i));
+    A.play('click');
+  }
+
   // ---------- Чат в игре ----------
   function openChat() {
     if (!Game.session || !Game.session.isNet) return;
     Game.chatOpen = true;
     I.clear();
-    const f = $('game-chat-form');
-    f.hidden = false;
+    $('game-chat-form').hidden = false;
     const inp = $('game-chat-input');
     inp.value = '';
     setTimeout(() => inp.focus(), 0);
@@ -164,18 +219,30 @@
     I.clear();
   }
 
+  function enterFullscreen(landscape) {
+    const d = document, el = d.documentElement;
+    if (d.fullscreenElement || d.webkitFullscreenElement) return;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) return;
+    try {
+      const p = req.call(el);
+      if (p && p.then && landscape && screen.orientation && screen.orientation.lock) p.then(() => screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
+    } catch (e) { /* игнор */ }
+  }
   function toggleFullscreen() {
     const d = document;
-    if (!d.fullscreenElement && !d.webkitFullscreenElement) {
-      const el = d.documentElement;
-      (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
-    } else (d.exitFullscreen || d.webkitExitFullscreen || (() => {})).call(d);
+    if (!d.fullscreenElement && !d.webkitFullscreenElement) enterFullscreen(I.isTouch);
+    else (d.exitFullscreen || d.webkitExitFullscreen || (() => {})).call(d);
   }
 
   function updateTouchButtons() {
     const show = !!Game.session && I.isTouch;
     $('btn-touch-menu').hidden = !show;
     $('btn-touch-score').hidden = !show;
+    $('tb-fire').hidden = !(show && !I.cfg.autoFire);
+    if (!show) { $('tb-block').hidden = true; $('tb-shop').hidden = true; }
+    document.body.classList.toggle('touch', I.isTouch);
+    $('main-foot').textContent = I.isTouch ? 'Левая половина экрана — движение, правая — прицел и огонь' : 'WASD — движение · Мышь — прицел · ЛКМ/Пробел — огонь';
   }
 
   function clearHash() { if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
@@ -262,6 +329,15 @@
     if (v && v !== UI.settings.name) { UI.settings.name = v; UI.applyProfile(); }
   }
 
+  // Кнопка, работающая при удержании (для сенсорных экранов)
+  function holdButton(el, onDown, onUp) {
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); try { el.setPointerCapture(e.pointerId); } catch (err) { /* игнор */ } onDown(); });
+    const up = (e) => { e.stopPropagation(); if (onUp) onUp(); };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
   // ---------- Привязка элементов ----------
   function bind() {
     document.addEventListener('click', (e) => {
@@ -278,7 +354,6 @@
       }
       UI.show(go);
     });
-    window.addEventListener('pointerdown', () => A.init(), { once: false, passive: true });
 
     $('solo-start').onclick = () => Game.startSolo(UI.solo.mode, UI.solo.opts || UI.defaultOpts(UI.solo.mode, true));
 
@@ -298,7 +373,6 @@
       const link = location.origin + location.pathname + '#' + (Game.room ? Game.room.code : '');
       copyText(link).then((ok) => UI.toast(ok ? 'Ссылка скопирована — отправьте её друзьям!' : 'Скопируйте ссылку вручную: ' + link, 3500));
     };
-    for (const b of document.querySelectorAll('#lobby-teams .btn')) b.onclick = () => Net.send({ t: 'team', team: +b.dataset.team });
     $('btn-start').onclick = () => Net.send({ t: 'start' });
     $('btn-leave').onclick = () => { Net.leaveRoom(); Game.room = null; clearHash(); UI.show('multi'); };
     $('lobby-chat-form').addEventListener('submit', (e) => {
@@ -309,15 +383,19 @@
     });
 
     // настройки
-    $('set-name').addEventListener('input', (e) => { const v = e.target.value.replace(/[<>]/g, '').slice(0, 16); if (v.trim()) { UI.settings.name = v.trim(); UI.saveSettings(); } });
+    const S = UI.settings;
+    const persist = () => { UI.saveSettings(); UI.applyGameSettings(); updateTouchButtons(); };
+    $('set-name').addEventListener('input', (e) => { const v = e.target.value.replace(/[<>]/g, '').slice(0, 16); if (v.trim()) { S.name = v.trim(); UI.saveSettings(); } });
     $('set-name').addEventListener('change', () => UI.applyProfile());
-    $('set-volume').addEventListener('input', (e) => { UI.settings.volume = +e.target.value; UI.saveSettings(); UI.applyGameSettings(); });
-    $('set-volume').addEventListener('change', () => { A.init(); A.play('pick'); });
-    $('set-quality').addEventListener('change', (e) => { UI.settings.quality = e.target.value; UI.saveSettings(); UI.applyGameSettings(); });
-    $('set-fps').addEventListener('change', (e) => { UI.settings.showFps = e.target.checked; UI.saveSettings(); UI.applyGameSettings(); });
-    $('set-shake').addEventListener('change', (e) => { UI.settings.shake = e.target.checked; UI.saveSettings(); UI.applyGameSettings(); });
-    $('set-names').addEventListener('change', (e) => { UI.settings.names = e.target.checked; UI.saveSettings(); UI.applyGameSettings(); });
+    const range = (id, key) => $(id).addEventListener('input', (e) => { S[key] = +e.target.value; $(id + '-v').textContent = S[key] + '%'; persist(); });
+    range('set-volume', 'volume'); range('set-sfx', 'sfx'); range('set-music', 'music'); range('set-particles', 'particles'); range('set-zoom', 'zoom');
+    $('set-sfx').addEventListener('change', () => A.play('pick'));
+    $('set-quality').addEventListener('change', (e) => { S.quality = e.target.value; persist(); });
+    const check = (id, key) => $(id).addEventListener('change', (e) => { S[key] = e.target.checked; persist(); });
+    check('set-fps', 'showFps'); check('set-shake', 'shake'); check('set-names', 'names'); check('set-dmg', 'dmgNums');
+    check('set-minimap', 'minimap'); check('set-vibrate', 'vibrate'); check('set-autofire', 'autoFire'); check('set-lefty', 'lefty'); check('set-autofs', 'autoFs');
     $('btn-fullscreen').onclick = toggleFullscreen;
+    $('btn-test-sound').onclick = () => { A.init(); A.play('pick'); A.buzz(60); Game.updateMusic(); };
 
     // админ
     $('admin-login').addEventListener('submit', (e) => {
@@ -325,39 +403,29 @@
       if ($('admin-pass').value === 'admin') { UI.adminOk = true; UI.renderAdmin(); A.play('pick'); }
       else { $('admin-err').hidden = false; A.play('hit'); }
     });
+    const saveAdmin = () => { try { localStorage.setItem('tbo_admin', JSON.stringify(UI.admin)); } catch (err) { /* игнор */ } };
     const adm = (id, key, fmt) => $(id).addEventListener('input', (e) => {
       UI.admin[key] = +e.target.value;
       $(id + '-v').textContent = fmt ? fmt(UI.admin[key]) : UI.admin[key];
-      try { localStorage.setItem('tbo_admin', JSON.stringify(UI.admin)); } catch (err) { /* игнор */ }
+      saveAdmin();
     });
     adm('adm-speed', 'player_speed');
     adm('adm-bullet', 'bullet_speed', (v) => v.toFixed(1));
     adm('adm-rate', 'fire_rate');
-    $('adm-god').addEventListener('change', (e) => { UI.admin.god_mode = e.target.checked; try { localStorage.setItem('tbo_admin', JSON.stringify(UI.admin)); } catch (err) { /* игнор */ } });
-    $('adm-reset').onclick = () => {
-      Object.assign(UI.admin, { player_speed: 3, bullet_speed: 1.0, fire_rate: 500, god_mode: false });
-      try { localStorage.setItem('tbo_admin', JSON.stringify(UI.admin)); } catch (err) { /* игнор */ }
-      UI.renderAdmin();
-    };
+    $('adm-god').addEventListener('change', (e) => { UI.admin.god_mode = e.target.checked; saveAdmin(); });
+    $('adm-reset').onclick = () => { Object.assign(UI.admin, { player_speed: 3, bullet_speed: 1.0, fire_rate: 470, god_mode: false }); saveAdmin(); UI.renderAdmin(); };
 
     // пауза
     $('pause-resume').onclick = closePause;
     $('pause-restart').onclick = () => { closePause(); if (Game.session && !Game.session.isNet) { Game.session.restart(false); UI.resetInGame(); } };
     $('pause-lobby').onclick = () => { closePause(); Net.send({ t: 'stop' }); };
-    $('pause-settings').onclick = () => { $('ov-pause').hidden = true; UI.returnTo = 'pause'; UI.show('settings'); UI.returnTo = 'pause'; };
+    $('pause-settings').onclick = () => { $('ov-pause').hidden = true; UI.returnTo = 'pause'; UI.show('settings'); };
     $('pause-exit').onclick = () => { closePause(); Game.exitToMenu(); };
 
     // результаты
-    $('res-next').onclick = () => {
-      const s = Game.session;
-      if (s && !s.isNet) { UI.hideResult(); Game.resultOpen = false; s.restart(true); UI.resetInGame(); I.clear(); }
-      else Net.send({ t: 'post', act: 'next' });
-    };
-    $('res-again').onclick = () => {
-      const s = Game.session;
-      if (s && !s.isNet) { UI.hideResult(); Game.resultOpen = false; s.restart(false); UI.resetInGame(); I.clear(); }
-      else Net.send({ t: 'post', act: 'again' });
-    };
+    const restartLocal = (next) => { const s = Game.session; UI.hideResult(); Game.resultOpen = false; s.restart(next); UI.resetInGame(); I.clear(); };
+    $('res-next').onclick = () => { const s = Game.session; if (s && !s.isNet) restartLocal(true); else Net.send({ t: 'post', act: 'next' }); };
+    $('res-again').onclick = () => { const s = Game.session; if (s && !s.isNet) restartLocal(false); else Net.send({ t: 'post', act: 'again' }); };
     $('res-lobby').onclick = () => Net.send({ t: 'post', act: 'lobby' });
     $('res-exit').onclick = () => Game.exitToMenu();
 
@@ -370,9 +438,16 @@
     });
     $('game-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeChat(); } });
 
+    // магазин
+    $('shop-close').onclick = (e) => { e.stopPropagation(); UI.showShop(false); };
+    $('shop').addEventListener('pointerdown', (e) => e.stopPropagation());
+
     // сенсорные кнопки
-    $('btn-touch-menu').onclick = () => (Game.paused ? closePause() : openPause());
-    $('btn-touch-score').onclick = () => { Game.showBoard = !Game.showBoard; $('scoreboard').hidden = !Game.showBoard; if (Game.showBoard) renderBoard(); };
+    holdButton($('btn-touch-menu'), () => (Game.paused ? closePause() : openPause()));
+    holdButton($('btn-touch-score'), () => { Game.showBoard = !Game.showBoard; $('scoreboard').hidden = !Game.showBoard; if (Game.showBoard) renderBoard(); });
+    holdButton($('tb-fire'), () => { I.fireBtn = true; }, () => { I.fireBtn = false; });
+    holdButton($('tb-block'), () => { Game.act(4); A.buzz(15); });
+    holdButton($('tb-shop'), toggleShop);
 
     // Горячие клавиши
     I.onKey = (e) => {
@@ -383,6 +458,7 @@
         return true;
       }
       if (e.code === 'Escape') {
+        if (UI.shopOpen) { UI.showShop(false); return false; }
         if (Game.showBoard) { Game.showBoard = false; $('scoreboard').hidden = true; return false; }
         if (UI.current) { UI.show(null); openPause(); return false; }
         if (Game.resultOpen) return false;
@@ -394,13 +470,25 @@
         return false;
       }
       if ((e.code === 'Enter' || e.code === 'NumpadEnter') && Game.session.isNet && !Game.paused && !UI.current) { openChat(); return false; }
+      if (Game.paused || UI.current || Game.resultOpen) return true;
+      if (e.code === 'KeyB') { toggleShop(); return false; }
+      if (e.code === 'KeyE' || e.code === 'KeyQ') { Game.act(4); return false; }
+      const m = /^(Digit|Numpad)([1-8])$/.exec(e.code);
+      if (m) {
+        const n = +m[2];
+        if (UI.shopOpen) Game.act(16 + n - 1);
+        else if (n <= 3) Game.act(n);
+        return false;
+      }
       return true;
     };
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Tab' && Game.showBoard && !I.isTouch) { Game.showBoard = false; $('scoreboard').hidden = true; }
     });
-    window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') { I.isTouch = true; updateTouchButtons(); } else if (e.pointerType === 'mouse' && I.isTouch) { I.isTouch = false; updateTouchButtons(); } });
-    window.addEventListener('beforeunload', () => { /* позволяем переподключиться по токену после перезагрузки */ });
+    window.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' && !I.isTouch) { I.isTouch = true; updateTouchButtons(); }
+      else if (e.pointerType === 'mouse' && I.isTouch) { I.isTouch = false; updateTouchButtons(); }
+    }, true);
   }
 
   // ---------- Запуск ----------
@@ -412,6 +500,7 @@
     netSetup();
     startDemo();
     UI.show('main');
+    updateTouchButtons();
     const m = /^#([A-Za-z0-9]{4})$/.exec(location.hash);
     if (m && Net.available()) {
       UI.show('multi');
